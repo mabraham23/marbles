@@ -1,7 +1,6 @@
 // Board geometry + SVG rendering. Pure of any specific client state — every
 // function takes the game `state` and a `viewerSeat` (which seat sits at the
-// bottom of the visual board). Used by both the multiplayer client and the
-// local debug harness.
+// bottom of the visual board).
 
 import {
   FINISH_LEN,
@@ -253,8 +252,6 @@ export function renderBoardLayers(layers, state, viewerSeat) {
       cx: point.x,
       cy: point.y,
       r: 5.1,
-      "data-place": PLACE.TRACK,
-      "data-abs-idx": i,
     });
     if (seat !== undefined) circle.setAttribute("stroke", PLAYER_COLORS[seat]);
     trackLayer.append(circle);
@@ -268,7 +265,6 @@ export function renderBoardLayers(layers, state, viewerSeat) {
     cx: BOARD_CENTER.x,
     cy: BOARD_CENTER.y,
     r: 5.1,
-    "data-place": PLACE.CENTER,
   }));
 
   // Finish lanes + home pads per active player.
@@ -282,9 +278,6 @@ export function renderBoardLayers(layers, state, viewerSeat) {
         cy: point.y,
         r: 6,
         stroke: PLAYER_COLORS[seat],
-        "data-place": PLACE.FINISH,
-        "data-player": player,
-        "data-slot": slot,
       }));
     }
     for (let index = 0; index < MARBLES_PER_PLAYER; index += 1) {
@@ -294,24 +287,20 @@ export function renderBoardLayers(layers, state, viewerSeat) {
         cx: point.x,
         cy: point.y,
         r: 7.5,
-        "data-place": PLACE.HOME,
-        "data-player": player,
-        "data-index": index,
       }));
     }
   }
 
   // Marbles.
-  state.marbles.forEach((marble, marbleIdx) => {
-    drawToken(tokenLayer, state, marble, marbleIdx, viewerSeat);
+  state.marbles.forEach((marble) => {
+    drawToken(tokenLayer, state, marble, viewerSeat);
   });
 }
 
-export function drawToken(tokenLayer, state, marble, marbleIdx, viewerSeat) {
+export function drawToken(tokenLayer, state, marble, viewerSeat) {
   const point = pointForMarble(state, marble, viewerSeat);
   const group = svgEl("g", {
     "aria-label": marbleToken(marble),
-    "data-marble-idx": marbleIdx,
   });
   group.append(svgEl("circle", {
     class: "token",

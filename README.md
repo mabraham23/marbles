@@ -13,20 +13,6 @@ Then open `http://localhost:3000` in your browser. The admin clicks **Create new
 
 Set `PORT=8080 npm start` if port 3000 is taken.
 
-## Debug / test harness
-
-There's a local-only sandbox at **`http://localhost:3000/debug.html`** for reproducing specific board states without a multi-tab multiplayer setup. It runs entirely client-side (no server room) and lets you:
-
-- Pick player count + mode and start a game.
-- Drive every player's turn from one screen.
-- Force the next die value (type 1–6 next to the Roll button; leave blank for random).
-- Switch whose turn it is with a dropdown.
-- Click any marble on the board, then click any hole/pad/center to teleport it. Use the "Send home / Send center / Apply finish slot" buttons for the selected marble.
-- "End turn" advances the active player without rolling.
-- Restart drops back to the setup form.
-
-The debug page isn't linked from the home view — reach it by URL.
-
 ## Run tests
 
 ```bash
