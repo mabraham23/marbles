@@ -13,6 +13,7 @@ import {
   MAX_TRACK_PROGRESS,
   CENTER_PROGRESS,
   CORNER_PROGRESSES,
+  START_OFFSET_IN_MODULE,
   PLAYER_COLORS,
   PLAYER_STROKES,
   PLACE,
@@ -201,11 +202,14 @@ function renderWoodGrain(woodLayer) {
 }
 
 function renderCornerLabels(trackLayer, state, viewerSeat) {
-  const playerStart = state.starts[state.currentPlayer];
-  if (playerStart === undefined) return;
+  // Corner labels are oriented to the local viewer (the seat at the bottom of
+  // the rendered board), not the current-turn player — otherwise the numbers
+  // would shuffle every turn as the perspective rotates. The viewer's start
+  // hole sits at absolute index `viewerSeat * MODULE_LEN + START_OFFSET_IN_MODULE`.
+  const viewerStart = viewerSeat * MODULE_LEN + START_OFFSET_IN_MODULE;
 
   CORNER_PROGRESSES.forEach((cornerProgress, index) => {
-    const point = trackPoint((playerStart + cornerProgress) % TRACK_LEN, viewerSeat);
+    const point = trackPoint((viewerStart + cornerProgress) % TRACK_LEN, viewerSeat);
     const away = normalize({ x: point.x - BOARD_CENTER.x, y: point.y - BOARD_CENTER.y });
     const labelPoint = {
       x: point.x + away.x * 25,
