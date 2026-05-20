@@ -121,10 +121,10 @@ h1 {
 }
 
 .current-player {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.15em;
-  padding: 0.02em 0.28em 0.08em;
+  display: inline-grid;
+  min-height: 1.18em;
+  place-items: center;
+  padding: 0 0.28em 0.04em;
   color: var(--player-ink, #fff);
   background: var(--player-color, var(--accent));
   border: 2px solid var(--player-stroke, rgba(255, 245, 222, 0.35));
@@ -137,7 +137,7 @@ h1 {
   font-size: clamp(1.65rem, 8vw, 2.35rem);
   font-weight: 900;
   letter-spacing: 0;
-  line-height: 0.98;
+  line-height: 1;
   text-shadow: none;
 }
 
@@ -1046,7 +1046,8 @@ input::placeholder {
 .conn-pill {
   position: fixed;
   top: max(10px, env(safe-area-inset-top));
-  right: 12px;
+  left: 12px;
+  max-width: min(72vw, 280px);
   z-index: 90;
   padding: 6px 12px;
   border-radius: 999px;

@@ -41,6 +41,7 @@ const CODE_LENGTH = 4;
 // WebSocket handles are transient and cannot be serialized to Redis.
 // We map roomCode -> { socketsByName: Map, preJoinSockets: Set }
 const roomConnections = new Map();
+const roomJoinQueues = new Map();
 
 function getConnections(code) {
   let conn = roomConnections.get(code);
@@ -53,6 +54,21 @@ function getConnections(code) {
 
 function deleteConnections(code) {
   roomConnections.delete(code);
+}
+
+async function withRoomJoinQueue(code, task) {
+  const previous = roomJoinQueues.get(code) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  const tail = previous.then(() => current, () => current);
+  roomJoinQueues.set(code, tail);
+  await previous.catch(() => {});
+  try {
+    return await task();
+  } finally {
+    release();
+    if (roomJoinQueues.get(code) === tail) roomJoinQueues.delete(code);
+  }
 }
 
 // ---------- Rooms ----------
@@ -188,77 +204,80 @@ async function handleJoinRoom(socket, msg) {
   if (!rawName) return sendError(socket, "Name required");
   if (rawName.length > 20) return sendError(socket, "Name too long");
 
-  const room = await roomStore.get(code);
-  if (!room) return sendError(socket, "Game not found");
-
   const name = rawName;
-  const conn = getConnections(code);
 
-  // Detach the joining socket from any prior room slot to avoid duplicates.
-  const previous = await findRoomBySocket(socket);
-  if (previous) {
-    if (previous.room.code !== code) {
-      const prevConn = getConnections(previous.room.code);
-      prevConn.preJoinSockets.delete(socket);
-      if (previous.name) prevConn.socketsByName.delete(previous.name);
-      await deleteRoomIfEmpty(previous.room);
-    }
-  }
+  return withRoomJoinQueue(code, async () => {
+    const room = await roomStore.get(code);
+    if (!room) return sendError(socket, "Game not found");
 
-  if (room.phase === "lobby") {
-    const existing = room.players.find((p) => p.name === name);
-    if (existing) {
-      const liveSocket = conn.socketsByName.get(name);
-      if (liveSocket && liveSocket !== socket && liveSocket.readyState === liveSocket.OPEN) {
-        return sendError(socket, "Name taken");
+    const conn = getConnections(code);
+
+    // Detach the joining socket from any prior room slot to avoid duplicates.
+    const previous = await findRoomBySocket(socket);
+    if (previous) {
+      if (previous.room.code !== code) {
+        const prevConn = getConnections(previous.room.code);
+        prevConn.preJoinSockets.delete(socket);
+        if (previous.name) prevConn.socketsByName.delete(previous.name);
+        await deleteRoomIfEmpty(previous.room);
       }
-      // Reclaim
-    } else {
-      if (room.players.length >= 6) return sendError(socket, "Lobby full");
-      room.players.push({ name });
     }
-  } else {
-    // Playing phase: only existing players may rejoin.
-    if (!room.gameState.playerNames.includes(name)) {
-      return sendError(socket, "Game already started");
-    }
-  }
 
-  // Admin claim
-  let isAdmin = false;
-  if (adminToken && adminToken === room.adminToken) {
-    if (room.adminName === null || room.adminName === name) {
-      room.adminName = name;
-      isAdmin = true;
+    if (room.phase === "lobby") {
+      const existing = room.players.find((p) => p.name === name);
+      if (existing) {
+        const liveSocket = conn.socketsByName.get(name);
+        if (liveSocket && liveSocket !== socket && liveSocket.readyState === liveSocket.OPEN) {
+          return sendError(socket, "Name taken");
+        }
+        // Reclaim
+      } else {
+        if (room.players.length >= 6) return sendError(socket, "Lobby full");
+        room.players.push({ name });
+      }
+    } else {
+      // Playing phase: only existing players may rejoin.
+      if (!room.gameState.playerNames.includes(name)) {
+        return sendError(socket, "Game already started");
+      }
+    }
+
+    // Admin claim
+    let isAdmin = false;
+    if (adminToken && adminToken === room.adminToken) {
+      if (room.adminName === null || room.adminName === name) {
+        room.adminName = name;
+        isAdmin = true;
+      } else if (room.adminName === name) {
+        isAdmin = true;
+      }
     } else if (room.adminName === name) {
       isAdmin = true;
     }
-  } else if (room.adminName === name) {
-    isAdmin = true;
-  }
 
-  // Attach socket properties
-  socket.roomCode = code;
-  socket.playerName = name;
+    // Attach socket properties
+    socket.roomCode = code;
+    socket.playerName = name;
 
-  conn.preJoinSockets.delete(socket);
-  // If they had a stale socket, replace it.
-  const oldSocket = conn.socketsByName.get(name);
-  if (oldSocket && oldSocket !== socket) {
-    try { oldSocket.close(); } catch { /* ignore */ }
-  }
-  conn.socketsByName.set(name, socket);
+    conn.preJoinSockets.delete(socket);
+    // If they had a stale socket, replace it.
+    const oldSocket = conn.socketsByName.get(name);
+    if (oldSocket && oldSocket !== socket) {
+      try { oldSocket.close(); } catch { /* ignore */ }
+    }
+    conn.socketsByName.set(name, socket);
 
-  await roomStore.set(code, room);
+    await roomStore.set(code, room);
 
-  safeSend(socket, { type: "joinedRoom", code: room.code, name, isAdmin });
-  safeSend(socket, { type: "chatHistory", chat: room.chat || [] });
+    safeSend(socket, { type: "joinedRoom", code: room.code, name, isAdmin });
+    safeSend(socket, { type: "chatHistory", chat: room.chat || [] });
 
-  if (room.phase === "lobby") {
-    await broadcastLobby(room);
-  } else {
-    await broadcastGame(room);
-  }
+    if (room.phase === "lobby") {
+      await broadcastLobby(room);
+    } else {
+      await broadcastGame(room);
+    }
+  });
 }
 
 async function handleLeaveRoom(socket) {

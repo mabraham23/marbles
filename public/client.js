@@ -442,6 +442,23 @@ function moveAccessibleLabel(state, move) {
   return occupant ? `${move.label}, bumps ${marbleToken(occupant)} home` : move.label;
 }
 
+function moveChipLabel(state, move) {
+  const marble = state.marbles[move.marbleIdx];
+  if (move.targetPlace === PLACE.CENTER) return "CTR";
+  if (move.targetPlace === PLACE.FINISH) return `F${(move.targetFinish ?? 0) + 1}`;
+  if (move.label.includes("jumps to corner")) {
+    const match = move.label.match(/corner (\d+)/);
+    return match ? `C${match[1]}` : "JMP";
+  }
+  if (move.label.includes("leaves home")) return marbleToken(marble);
+  if (move.label.includes("backward")) return "BACK";
+  return marbleToken(marble);
+}
+
+function moveDisplayLabel(state, move) {
+  return moveAccessibleLabel(state, move);
+}
+
 function disablePendingMoveControls() {
   Array.from(movesPanel.querySelectorAll("button")).forEach((button) => {
     button.disabled = true;
@@ -504,7 +521,7 @@ function makeMoveChoiceChip(state, entry, x, y, isCapture, hitRadius) {
   group.append(svgEl("circle", { class: "move-hit", cx: x, cy: y, r: hitRadius }));
   group.append(svgEl("circle", { class: "move-chip", cx: x, cy: y, r: 12.5 }));
   const text = svgEl("text", { class: "move-chip-label", x, y: y + 0.4 });
-  text.textContent = marbleToken(marble);
+  text.textContent = moveChipLabel(state, entry.move);
   group.append(text);
   addMoveHintActivation(group, entry.moveIdx);
   return group;
@@ -606,7 +623,7 @@ function renderGame() {
       const b = document.createElement("button");
       b.className = "move-button";
       b.type = "button";
-      b.textContent = m.label;
+      b.textContent = moveDisplayLabel(state, m);
       b.addEventListener("click", () => submitPendingMove(idx));
       movesPanel.append(b);
     });
