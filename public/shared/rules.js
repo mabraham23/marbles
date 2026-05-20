@@ -8,7 +8,7 @@ export const APEX_LEN = 1;
 export const MODULE_LEN = ARM_ROW_LEN + SIDE_ROW_LEN + ARM_ROW_LEN + APEX_LEN;
 export const START_OFFSET_IN_MODULE = ARM_ROW_LEN + SIDE_ROW_LEN - 1;
 export const TRACK_LEN = MODULE_LEN * 6;
-export const MAX_TRACK_PROGRESS = MODULE_LEN * 5 + ARM_ROW_LEN + APEX_LEN;
+export const MAX_TRACK_PROGRESS = TRACK_LEN - 2;
 export const CENTER_PROGRESS = ARM_ROW_LEN + APEX_LEN + 1;
 export const CORNER_PROGRESSES = Array.from({ length: 6 }, (_, i) => i * MODULE_LEN + ARM_ROW_LEN + APEX_LEN);
 
@@ -244,42 +244,6 @@ export function legalMoves(state, player, roll) {
         }
       }
 
-      // Handle marbles that went backward to progress 81 or 82
-      if (marble.progress === 81 || marble.progress === 82) {
-        const nextProgress = marble.progress + roll;
-        if (nextProgress === 82) {
-          const abs = (startForPlayer(state, pOwner) + 82) % TRACK_LEN;
-          const occupant = marbleAtTrack(state, abs);
-          if (!occupant || occupant.player !== pOwner) {
-            moves.push({
-              marbleIdx,
-              label: `${marbleToken(marble)} moves 1`,
-              targetPlace: PLACE.TRACK,
-              targetProgress: 82,
-            });
-          }
-        } else {
-          const finishSlot = nextProgress - 83;
-          if (finishSlot >= 0 && finishSlot < FINISH_LEN) {
-            const finishes = ownFinishSlots(state, pOwner);
-            const occupiedTrack = ownTrackProgresses(state, pOwner);
-            const trackBlocked = nextProgress > 81 && occupiedTrack.has(82);
-            let finishBlocked = false;
-            for (let slot = 0; slot <= finishSlot; slot += 1) {
-              if (finishes.has(slot)) finishBlocked = true;
-            }
-            if (!trackBlocked && !finishBlocked) {
-              moves.push({
-                marbleIdx,
-                label: `${marbleToken(marble)} enters finish ${finishSlot + 1}`,
-                targetPlace: PLACE.FINISH,
-                targetFinish: finishSlot,
-              });
-            }
-          }
-        }
-        return;
-      }
 
       if (marble.progress < CENTER_PROGRESS && marble.progress + roll === CENTER_PROGRESS) {
         if (!pathCrossesOwnMarble(state, pOwner, marble.progress, CENTER_PROGRESS - 1)) {

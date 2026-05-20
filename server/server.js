@@ -252,6 +252,7 @@ async function handleJoinRoom(socket, msg) {
   await roomStore.set(code, room);
 
   safeSend(socket, { type: "joinedRoom", code: room.code, name, isAdmin });
+  safeSend(socket, { type: "chatHistory", chat: room.chat || [] });
 
   if (room.phase === "lobby") {
     await broadcastLobby(room);
@@ -430,6 +431,39 @@ async function handleSubmitMove(socket, msg) {
   await broadcastGame(room);
 }
 
+async function handleChat(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const room = found.room;
+  const name = found.name;
+
+  const text = typeof msg.text === "string" ? msg.text.trim() : "";
+  if (!text) return sendError(socket, "Message is empty");
+  if (text.length > 150) return sendError(socket, "Message too long");
+
+  room.chat = room.chat || [];
+  room.chat.push({
+    sender: name,
+    text,
+    timestamp: Date.now(),
+  });
+
+  if (room.chat.length > 50) {
+    room.chat.shift();
+  }
+
+  await roomStore.set(room.code, room);
+
+  // Broadcast to all sockets in this room
+  const conn = getConnections(room.code);
+  const payload = {
+    type: "chatHistory",
+    chat: room.chat,
+  };
+  for (const s of conn.socketsByName.values()) safeSend(s, payload);
+  for (const s of conn.preJoinSockets) safeSend(s, payload);
+}
+
 // ---------- Message router ----------
 
 async function handleMessage(socket, raw) {
@@ -452,6 +486,7 @@ async function handleMessage(socket, raw) {
       case "endGame":     return await handleEndGame(socket);
       case "roll":        return await handleRoll(socket);
       case "submitMove":  return await handleSubmitMove(socket, msg);
+      case "chat":        return await handleChat(socket, msg);
       default:
         return sendError(socket, `Unknown message type: ${msg.type}`);
     }

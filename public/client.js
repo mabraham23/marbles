@@ -70,6 +70,9 @@ const ui = {
   connected: false,
   isNoMoveDelayActive: false,
   lastProcessedNoMoveRollId: null,
+  isChatOpen: false,
+  unreadCount: 0,
+  chatHistory: [],
 };
 
 let diceSpinTimer = null;
@@ -92,6 +95,22 @@ function showView(name) {
   } else if (name === "home") {
     nameForm.hidden = true;
     document.querySelector("#homeChoices").hidden = false;
+  }
+
+  // Manage chat visibility
+  const chatToggleBtn = document.querySelector("#chatToggleBtn");
+  const chatDrawer = document.querySelector("#chatDrawer");
+  if (name === "lobby" || name === "game") {
+    if (chatToggleBtn) chatToggleBtn.hidden = false;
+  } else {
+    if (chatToggleBtn) chatToggleBtn.hidden = true;
+    if (chatDrawer) {
+      chatDrawer.hidden = true;
+      chatDrawer.classList.remove("open");
+    }
+    ui.isChatOpen = false;
+    ui.unreadCount = 0;
+    updateChatBadge();
   }
 }
 
@@ -244,6 +263,9 @@ function handleServerMessage(msg) {
       } else if (!ui.isNoMoveDelayActive) {
         renderGame();
       }
+      break;
+    case "chatHistory":
+      handleChatHistory(msg.chat);
       break;
     case "error":
       // Server restarted (cold start) — room no longer exists. Surface a
@@ -612,5 +634,122 @@ function init() {
   }
   connect();
 }
+
+// --- Lobby Chat Logic ---
+const chatMessages = document.querySelector("#chatMessages");
+const chatToggleBtn = document.querySelector("#chatToggleBtn");
+const chatCloseBtn = document.querySelector("#chatCloseBtn");
+const chatDrawer = document.querySelector("#chatDrawer");
+const chatForm = document.querySelector("#chatForm");
+const chatInput = document.querySelector("#chatInput");
+const chatBadge = document.querySelector("#chatBadge");
+
+function handleChatHistory(chat) {
+  const oldHistoryLength = ui.chatHistory.length;
+  ui.chatHistory = chat;
+  
+  renderChat();
+
+  // If the chat drawer is closed and we received new messages from someone else:
+  if (!ui.isChatOpen && oldHistoryLength > 0 && chat.length > oldHistoryLength) {
+    const newMessages = chat.slice(oldHistoryLength);
+    const unreadFromOthers = newMessages.filter(m => m.sender !== ui.myName).length;
+    ui.unreadCount += unreadFromOthers;
+    updateChatBadge();
+  }
+}
+
+function getColorForSender(senderName) {
+  if (ui.game && ui.game.playerNames) {
+    const pIdx = ui.game.playerNames.indexOf(senderName);
+    if (pIdx >= 0 && ui.game.seatColors) {
+      const seat = ui.game.seatColors[pIdx];
+      if (seat !== undefined) return PLAYER_COLORS[seat];
+    }
+  } else if (ui.lobby && ui.lobby.players) {
+    const pIdx = ui.lobby.players.findIndex(p => p.name === senderName);
+    if (pIdx >= 0) return PLAYER_COLORS[pIdx % PLAYER_COLORS.length];
+  }
+  return "#c7b891"; // Default muted wood/gold color
+}
+
+function renderChat() {
+  if (!chatMessages) return;
+
+  chatMessages.innerHTML = "";
+  for (const msg of ui.chatHistory) {
+    const isMe = msg.sender === ui.myName;
+    
+    const msgEl = document.createElement("div");
+    msgEl.className = `chat-msg ${isMe ? "me" : ""}`;
+
+    const senderEl = document.createElement("div");
+    senderEl.className = "chat-msg-sender";
+    senderEl.textContent = msg.sender;
+    senderEl.style.color = getColorForSender(msg.sender);
+
+    const bubbleEl = document.createElement("div");
+    bubbleEl.className = "chat-msg-bubble";
+    bubbleEl.textContent = msg.text;
+
+    const timeEl = document.createElement("div");
+    timeEl.className = "chat-msg-time";
+    const date = new Date(msg.timestamp);
+    timeEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    msgEl.appendChild(senderEl);
+    msgEl.appendChild(bubbleEl);
+    msgEl.appendChild(timeEl);
+
+    chatMessages.appendChild(msgEl);
+  }
+
+  // Auto-scroll to bottom
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function updateChatBadge() {
+  if (!chatBadge) return;
+  if (ui.unreadCount > 0) {
+    chatBadge.textContent = ui.unreadCount > 9 ? "9+" : ui.unreadCount;
+    chatBadge.hidden = false;
+  } else {
+    chatBadge.hidden = true;
+  }
+}
+
+function toggleChat() {
+  if (!chatDrawer) return;
+  ui.isChatOpen = !ui.isChatOpen;
+  if (ui.isChatOpen) {
+    chatDrawer.hidden = false;
+    // Force a reflow
+    chatDrawer.offsetHeight;
+    chatDrawer.classList.add("open");
+    ui.unreadCount = 0;
+    updateChatBadge();
+    if (chatInput) chatInput.focus();
+    if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+  } else {
+    chatDrawer.classList.remove("open");
+    setTimeout(() => {
+      if (!ui.isChatOpen) chatDrawer.hidden = true;
+    }, 350);
+  }
+}
+
+$on(chatToggleBtn, "click", toggleChat);
+$on(chatCloseBtn, "click", () => {
+  if (ui.isChatOpen) toggleChat();
+});
+
+$on(chatForm, "submit", (e) => {
+  e.preventDefault();
+  if (!chatInput) return;
+  const text = chatInput.value.trim();
+  if (!text) return;
+  send({ type: "chat", text });
+  chatInput.value = "";
+});
 
 init();

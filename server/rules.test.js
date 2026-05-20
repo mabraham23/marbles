@@ -359,3 +359,34 @@ test("team play teammate move sharing rule: finished player can move unfinished 
   assert.equal(blackMarble.progress, 0);
   assert.equal(blackMarble.player, 2);
 });
+
+test("finish entrance progress: normal forward traversal must reach progress 82", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+
+  // Set up a marble at progress 74
+  state.marbles[0].place = PLACE.TRACK;
+  state.marbles[0].progress = 74;
+
+  // Roll 2: should move to progress 76 on the track (NOT enter finish)
+  const moves2 = legalMoves(state, 0, 2);
+  const move2 = moves2.find((m) => m.label.includes("moves 2"));
+  assert.ok(move2);
+  assert.equal(move2.targetPlace, PLACE.TRACK);
+  assert.equal(move2.targetProgress, 76);
+  assert.equal(moves2.some((m) => m.targetPlace === PLACE.FINISH), false, "should not enter finish from progress 74 with roll 2");
+
+  // Move marble to progress 82
+  state.marbles[0].progress = 82;
+
+  // Roll 1: should enter finish 1 (slot 0)
+  const moves1 = legalMoves(state, 0, 1);
+  const move1 = moves1.find((m) => m.label.includes("enters finish 1"));
+  assert.ok(move1);
+  assert.equal(move1.targetPlace, PLACE.FINISH);
+  assert.equal(move1.targetFinish, 0);
+});
+

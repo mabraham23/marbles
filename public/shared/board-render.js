@@ -383,9 +383,7 @@ export function buildMovePath(state, lastMove, viewerSeat) {
     return points;
   }
   if (lastMove.before.place === PLACE.TRACK && lastMove.targetPlace === PLACE.FINISH) {
-    if (lastMove.before.progress === 81) {
-      points.push(trackHole(82));
-    } else if (lastMove.before.progress < 81) {
+    if (lastMove.before.progress < MAX_TRACK_PROGRESS) {
       for (let p = lastMove.before.progress + 1; p <= MAX_TRACK_PROGRESS; p += 1) points.push(trackHole(p));
     }
     for (let s = 0; s <= lastMove.targetFinish; s += 1) points.push(finishPoint(state, player, s, viewerSeat));
