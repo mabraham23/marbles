@@ -52,6 +52,10 @@ const resetGameBtn = document.querySelector("#resetGameButton");
 const endGameBtn = document.querySelector("#endGameButton");
 const adminGameActions = document.querySelector("#adminGameActions");
 
+const connPill = document.querySelector("#connPill");
+const endedModal = document.querySelector("#endedModal");
+const endedHomeBtn = document.querySelector("#endedHomeBtn");
+
 // Client state
 const ui = {
   view: "home", // 'home' | 'name' | 'lobby' | 'game'
@@ -94,16 +98,97 @@ function showError(msg) {
   setTimeout(() => { errorBanner.hidden = true; }, 4000);
 }
 
-// --- WebSocket ---
-function connectSocket() {
+// --- Session persistence (per-tab) ---
+// Stored in sessionStorage so it doesn't leak across browser tabs the way
+// localStorage did. localStorage still holds the adminToken so a hard tab
+// close + reopen can reclaim admin.
+function loadSession(code) {
+  try {
+    const raw = sessionStorage.getItem(`session:${code}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function saveSession(code, data) {
+  try { sessionStorage.setItem(`session:${code}`, JSON.stringify(data)); } catch {}
+}
+function clearSession(code) {
+  try { sessionStorage.removeItem(`session:${code}`); } catch {}
+}
+function loadAdminToken(code) {
+  try { return localStorage.getItem(`adminToken:${code}`) || null; } catch { return null; }
+}
+
+// --- Connection manager ---
+// Auto-reconnects with exponential backoff, transparently rejoins the room
+// on every reconnect using the cached session, and surfaces state via the
+// corner pill. No reloads required.
+const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000];
+let socket = null;
+let reconnectAttempt = 0;
+let pillFlashTimer = null;
+let manuallyClosed = false;
+
+function setConnState(state) {
+  if (!connPill) return;
+  connPill.hidden = false;
+  connPill.dataset.state = state;
+  if (state === "connected") {
+    connPill.textContent = "Connected";
+    // Briefly show the green pill on first connect, then fade out.
+    if (pillFlashTimer) clearTimeout(pillFlashTimer);
+    pillFlashTimer = setTimeout(() => { connPill.hidden = true; }, 1200);
+  } else if (state === "reconnecting") {
+    connPill.textContent = "Reconnecting…";
+  } else if (state === "connecting") {
+    connPill.textContent = "Connecting…";
+  } else {
+    connPill.textContent = "Offline";
+  }
+}
+
+function flashPillBriefly(text) {
+  if (!connPill) return;
+  if (pillFlashTimer) clearTimeout(pillFlashTimer);
+  connPill.hidden = false;
+  connPill.dataset.state = "offline";
+  connPill.textContent = text;
+  pillFlashTimer = setTimeout(() => {
+    setConnState(ui.connected ? "connected" : "reconnecting");
+  }, 1500);
+}
+
+function connect() {
+  manuallyClosed = false;
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const url = `${proto}//${location.host}/ws`;
+  setConnState(reconnectAttempt > 0 ? "reconnecting" : "connecting");
   const sock = new WebSocket(url);
-  ui.socket = sock;
-  sock.addEventListener("open", () => { ui.connected = true; });
+  socket = sock;
+  sock.addEventListener("open", () => {
+    ui.socket = sock;
+    ui.connected = true;
+    reconnectAttempt = 0;
+    setConnState("connected");
+    // If we were previously in a room, silently rejoin so the UI catches up.
+    if (ui.roomCode && ui.myName) {
+      sock.send(JSON.stringify({
+        type: "joinRoom",
+        code: ui.roomCode,
+        name: ui.myName,
+        adminToken: loadAdminToken(ui.roomCode) || undefined,
+      }));
+    }
+  });
   sock.addEventListener("close", () => {
     ui.connected = false;
-    showError("Disconnected. Reload to reconnect.");
+    if (manuallyClosed) return;
+    const delay = RECONNECT_DELAYS[Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)];
+    reconnectAttempt += 1;
+    setConnState("reconnecting");
+    setTimeout(connect, delay);
+  });
+  sock.addEventListener("error", () => {
+    // Let the close handler drive retry — error always precedes close.
   });
   sock.addEventListener("message", (ev) => {
     let msg;
@@ -113,8 +198,12 @@ function connectSocket() {
 }
 
 function send(payload) {
-  if (!ui.connected || !ui.socket) return;
-  ui.socket.send(JSON.stringify(payload));
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(payload));
+    return true;
+  }
+  flashPillBriefly("Offline — wait to reconnect");
+  return false;
 }
 
 function handleServerMessage(msg) {
@@ -132,6 +221,8 @@ function handleServerMessage(msg) {
       ui.roomCode = msg.code;
       ui.myName = msg.name;
       ui.isAdmin = msg.isAdmin;
+      // Cache identity per-tab so a reload / brief disconnect rejoins silently.
+      saveSession(msg.code, { name: msg.name, isAdmin: msg.isAdmin });
       break;
     case "lobbyState":
       ui.lobby = msg;
@@ -145,6 +236,18 @@ function handleServerMessage(msg) {
       renderGame();
       break;
     case "error":
+      // Server restarted (cold start) — room no longer exists. Surface a
+      // friendly modal and stop the auto-rejoin loop instead of looping
+      // through "Game not found" errors forever.
+      if (msg.message === "Game not found" && ui.roomCode) {
+        clearSession(ui.roomCode);
+        try { localStorage.removeItem(`adminToken:${ui.roomCode}`); } catch {}
+        ui.roomCode = null;
+        ui.myName = null;
+        ui.isAdmin = false;
+        if (endedModal) endedModal.hidden = false;
+        return;
+      }
       showError(msg.message);
       break;
   }
@@ -196,8 +299,17 @@ $on(copyLinkBtn, "click", async () => {
 
 $on(startBtn, "click", () => send({ type: "startGame" }));
 $on(leaveBtn, "click", () => {
+  const code = ui.roomCode;
   send({ type: "leaveRoom" });
-  try { localStorage.removeItem(`adminToken:${ui.roomCode}`); } catch {}
+  if (code) {
+    clearSession(code);
+    try { localStorage.removeItem(`adminToken:${code}`); } catch {}
+  }
+  location.href = location.pathname;
+});
+
+$on(endedHomeBtn, "click", () => {
+  if (endedModal) endedModal.hidden = true;
   location.href = location.pathname;
 });
 
@@ -422,11 +534,21 @@ function init() {
   const room = params.get("room");
   if (room) {
     ui.roomCode = room.toUpperCase();
-    showView("name");
+    const session = loadSession(ui.roomCode);
+    if (session && session.name) {
+      // We've been in this room before in this tab. Prime myName so the WS
+      // onopen handler silently rejoins, and skip the name form. The
+      // lobbyState / gameState message that follows will pick the right view.
+      ui.myName = session.name;
+      ui.isAdmin = !!session.isAdmin;
+      for (const v of [homeView, lobbyView, gameView]) v.hidden = true;
+    } else {
+      showView("name");
+    }
   } else {
     showView("home");
   }
-  connectSocket();
+  connect();
 }
 
 init();

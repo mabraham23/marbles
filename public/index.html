@@ -10,6 +10,14 @@
     <link rel="stylesheet" href="styles.css?v=12" />
   </head>
   <body>
+    <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
+    <div id="endedModal" class="modal-overlay" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="endedTitle">
+        <h2 id="endedTitle">Game ended</h2>
+        <p>This game is no longer running — the server may have restarted. Start a new one to keep playing.</p>
+        <button id="endedHomeBtn" class="primary-button" type="button">Create new game</button>
+      </div>
+    </div>
     <main class="app-shell">
       <div id="errorBanner" class="error-banner" hidden></div>
 

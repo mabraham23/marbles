@@ -441,7 +441,15 @@ const PORT = Number(process.env.PORT) || 3000;
 const httpServer = http.createServer(serveStatic);
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
+// WebSocket-level heartbeat. Proxies between browser and Render kill idle
+// connections within ~60–120s; mobile Safari closes WS when the page goes
+// to the background. Pinging every 25s keeps the connection warm and lets
+// the server detect dead sockets within ~50s instead of waiting for TCP.
+const HEARTBEAT_INTERVAL_MS = 25_000;
+
 wss.on("connection", (socket) => {
+  socket.isAlive = true;
+  socket.on("pong", () => { socket.isAlive = true; });
   socket.on("message", (data) => handleMessage(socket, data.toString()));
   socket.on("close", () => {
     const found = findRoomBySocket(socket);
@@ -459,6 +467,21 @@ wss.on("connection", (socket) => {
     console.warn("socket error", err.message);
   });
 });
+
+// Sweep dead sockets. Each cycle: terminate any socket whose previous ping
+// went unanswered, then ping the rest.
+const heartbeatTimer = setInterval(() => {
+  wss.clients.forEach((socket) => {
+    if (socket.isAlive === false) {
+      try { socket.terminate(); } catch { /* ignore */ }
+      return;
+    }
+    socket.isAlive = false;
+    try { socket.ping(); } catch { /* ignore */ }
+  });
+}, HEARTBEAT_INTERVAL_MS);
+heartbeatTimer.unref();
+wss.on("close", () => clearInterval(heartbeatTimer));
 
 // Periodic GC: drop empty rooms older than 1h.
 setInterval(() => {
