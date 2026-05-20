@@ -68,11 +68,17 @@ function makeCornerTargets() {
 }
 
 function makeArmPoints(sideRow, endpointIndex, direction, target) {
+  // For direction "in", the arm enters this module FROM the previous corner's
+  // apex (= target) and progresses TOWARD this module's side row endpoint.
+  // arm_in[0] should sit just past the apex; arm_in[ARM_ROW_LEN - 1] should
+  // sit just before the side row endpoint. Both directions therefore lerp from
+  // the apex/sideRow endpoint that the path is leaving toward the one it is
+  // approaching, with t increasing along travel.
   const endpoint = sideRow[endpointIndex];
   const segments = ARM_ROW_LEN + 1;
   return Array.from({ length: ARM_ROW_LEN }, (_, index) => {
     const t = (index + 1) / segments;
-    return direction === "in" ? lerpPoint(target, endpoint, 1 - t) : lerpPoint(endpoint, target, t);
+    return direction === "in" ? lerpPoint(target, endpoint, t) : lerpPoint(endpoint, target, t);
   });
 }
 
