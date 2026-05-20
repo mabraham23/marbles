@@ -5,6 +5,7 @@ import {
   PLAYER_COLORS,
   PLAYER_STROKES,
   modeLabel,
+  PLACE,
 } from "./shared/rules.js";
 
 import {
@@ -453,8 +454,22 @@ function renderStatus() {
   for (let player = 0; player < state.playerCount; player += 1) {
     const seat = state.seatColors[player];
     const teamSuffix = state.teams ? `Team ${String.fromCharCode(65 + state.teams.findIndex((t) => t.includes(player)))}` : `Player ${player + 1}`;
+    const playerMarbles = state.marbles.filter((m) => m.player === player);
+    const atHome = playerMarbles.filter((m) => m.place === PLACE.HOME).length;
+    const finished = playerMarbles.filter((m) => m.place === PLACE.FINISH).length;
+
     rows.push(
-      `<div class="player-row"><span><span class="swatch" style="background:${PLAYER_COLORS[seat]};border:1px solid ${PLAYER_STROKES[seat]}"></span>${escapeHTML(state.playerNames[player])}</span><span>${teamSuffix}</span></div>`,
+      `<div class="player-row">` +
+        `<div class="player-info">` +
+          `<span class="swatch" style="background:${PLAYER_COLORS[seat]};border:1px solid ${PLAYER_STROKES[seat]}"></span>` +
+          `<span class="player-name">${escapeHTML(state.playerNames[player])}</span>` +
+        `</div>` +
+        `<div class="player-stats">` +
+          `<span class="stat-badge home-badge" title="Marbles still at Home">🏠 ${atHome}</span>` +
+          `<span class="stat-badge finish-badge" title="Marbles made it Home">🏁 ${finished}</span>` +
+        `</div>` +
+        `<span class="team-badge">${teamSuffix}</span>` +
+      `</div>`,
     );
   }
   const recent = state.log.slice(0, 6).map((e) => `<div class="log-row">${escapeHTML(e)}</div>`).join("");
