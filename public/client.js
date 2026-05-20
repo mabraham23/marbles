@@ -47,7 +47,9 @@ const rollButton = document.querySelector("#rollButton");
 const dieValueEl = document.querySelector("#dieValue");
 const movesPanel = document.querySelector("#movesPanel");
 const statusPanel = document.querySelector("#statusPanel");
-const newGameBtn = document.querySelector("#newGameButton");
+const resetGameBtn = document.querySelector("#resetGameButton");
+const endGameBtn = document.querySelector("#endGameButton");
+const adminGameActions = document.querySelector("#adminGameActions");
 
 // Client state
 const ui = {
@@ -254,18 +256,23 @@ function renderGame() {
   const cp = state.currentPlayer;
   const seat = state.seatColors[cp];
   const isMyTurn = state.currentPlayer === localPlayerIdx();
+  resetGameBtn.hidden = !ui.isAdmin;
+  adminGameActions.hidden = !ui.isAdmin;
 
   rollButton.style.setProperty("--dice-color", PLAYER_COLORS[seat]);
   rollButton.style.setProperty("--dice-stroke", PLAYER_STROKES[seat]);
   rollButton.style.setProperty("--dice-ink", tokenLabelColor(seat));
+  movesPanel.style.setProperty("--current-player-color", PLAYER_COLORS[seat]);
+  movesPanel.style.setProperty("--current-player-stroke", PLAYER_STROKES[seat]);
+  movesPanel.style.setProperty("--current-player-ink", tokenLabelColor(seat));
 
   // Turn panel
   if (state.gameOver) {
     turnLabel.innerHTML = `<span class="winner">${state.winner} wins</span>`;
   } else {
-    turnLabel.innerHTML = `<span class="current-player" style="color:${PLAYER_COLORS[seat]};text-shadow:0 0 1px ${PLAYER_STROKES[seat]}">${escapeHTML(
+    turnLabel.innerHTML = `<span class="current-player" style="--player-color:${PLAYER_COLORS[seat]};--player-stroke:${PLAYER_STROKES[seat]};--player-ink:${tokenLabelColor(seat)}">${escapeHTML(
       state.playerNames[cp],
-    )}</span><span class="turn-meta">Turn ${state.turnNumber}${isMyTurn ? " · Your roll" : ""}</span>`;
+    )}</span>`;
   }
 
   // Dice
@@ -389,10 +396,14 @@ $on(rollButton, "click", () => {
   send({ type: "roll" });
 });
 
-$on(newGameBtn, "click", () => {
-  send({ type: "leaveRoom" });
-  try { localStorage.removeItem(`adminToken:${ui.roomCode}`); } catch {}
-  location.href = location.pathname;
+$on(resetGameBtn, "click", () => {
+  if (!ui.isAdmin) return;
+  send({ type: "resetGame" });
+});
+
+$on(endGameBtn, "click", () => {
+  if (!ui.isAdmin) return;
+  send({ type: "endGame" });
 });
 
 // --- Init ---

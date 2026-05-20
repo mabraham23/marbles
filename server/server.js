@@ -276,6 +276,49 @@ function handleStartGame(socket) {
   broadcastGame(room);
 }
 
+function makeFreshGameState(room) {
+  const sourceNames = room.gameState?.playerNames?.length
+    ? room.gameState.playerNames
+    : room.players.map((p) => p.name);
+  const playerNames = sourceNames.slice();
+  const playerCount = playerNames.length;
+  const allowed = validModes(playerCount);
+  let mode = room.gameState?.mode || room.mode;
+  if (!mode || !allowed.includes(mode)) mode = MODES.SINGLE;
+  room.mode = mode;
+  return createInitialState({ playerCount, mode, playerNames });
+}
+
+function handleResetGame(socket) {
+  const found = findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase !== "playing" || !room.gameState) return sendError(socket, "Game not started");
+  if (room.adminName !== name) return sendError(socket, "Only the admin can reset");
+
+  room.gameState = makeFreshGameState(room);
+  room.phase = "playing";
+  room.pendingMoves = null;
+  room.pendingMovesFor = null;
+  broadcastGame(room);
+}
+
+function handleEndGame(socket) {
+  const found = findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase !== "playing") return sendError(socket, "Game not started");
+  if (room.adminName !== name) return sendError(socket, "Only the admin can end the game");
+
+  const names = room.gameState?.playerNames || room.players.map((p) => p.name);
+  room.players = names.map((playerName) => ({ name: playerName }));
+  room.phase = "lobby";
+  room.gameState = null;
+  room.pendingMoves = null;
+  room.pendingMovesFor = null;
+  broadcastLobby(room);
+}
+
 function handleRoll(socket) {
   const found = findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
@@ -346,6 +389,8 @@ function handleMessage(socket, raw) {
     case "leaveRoom":   return handleLeaveRoom(socket);
     case "setMode":     return handleSetMode(socket, msg);
     case "startGame":   return handleStartGame(socket);
+    case "resetGame":   return handleResetGame(socket);
+    case "endGame":     return handleEndGame(socket);
     case "roll":        return handleRoll(socket);
     case "submitMove":  return handleSubmitMove(socket, msg);
     default:

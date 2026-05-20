@@ -395,13 +395,13 @@ function render() {
   // Turn label
   const cp = state.currentPlayer;
   const seat = state.seatColors[cp];
-  const teamSuffix = state.teams
-    ? ` · Team ${String.fromCharCode(65 + state.teams.findIndex((t) => t.includes(cp)))}`
-    : "";
+  movesPanel.style.setProperty("--current-player-color", PLAYER_COLORS[seat]);
+  movesPanel.style.setProperty("--current-player-stroke", PLAYER_STROKES[seat]);
+  movesPanel.style.setProperty("--current-player-ink", tokenLabelColor(seat));
   if (state.gameOver) {
     turnLabel.innerHTML = `<span class="winner">${escapeHTML(state.winner)} wins</span>`;
   } else {
-    turnLabel.innerHTML = `<span class="section-label">Current turn</span><span class="current-player" style="color:${PLAYER_COLORS[seat]};text-shadow:0 0 1px ${PLAYER_STROKES[seat]}">${escapeHTML(state.playerNames[cp])}</span><span class="turn-meta">Turn ${state.turnNumber}${teamSuffix}</span>`;
+    turnLabel.innerHTML = `<span class="section-label">Current turn</span><span class="current-player" style="--player-color:${PLAYER_COLORS[seat]};--player-stroke:${PLAYER_STROKES[seat]};--player-ink:${tokenLabelColor(seat)}">${escapeHTML(state.playerNames[cp])}</span>`;
   }
   currentPlayerSelect.value = String(state.currentPlayer);
 

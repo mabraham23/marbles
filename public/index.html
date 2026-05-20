@@ -4,16 +4,58 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Marbles</title>
-    <link rel="stylesheet" href="styles.css?v=5" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css?v=12" />
   </head>
   <body>
     <main class="app-shell">
       <div id="errorBanner" class="error-banner" hidden></div>
 
       <!-- HOME VIEW -->
-      <section id="homeView" class="card center-card" hidden>
-        <h1 class="title">Marbles</h1>
-        <p class="subtitle">Hex marbles with family</p>
+      <section id="homeView" class="card center-card home-card" hidden>
+        <svg class="home-board-art" viewBox="0 0 280 280" aria-hidden="true">
+          <defs>
+            <linearGradient id="homeBoardFill" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#f1d9aa" />
+              <stop offset="100%" stop-color="#d3aa64" />
+            </linearGradient>
+            <filter id="homeBoardShadow" x="-25%" y="-25%" width="150%" height="150%">
+              <feDropShadow dx="0" dy="9" stdDeviation="10" flood-color="#000000" flood-opacity="0.35" />
+            </filter>
+          </defs>
+          <polygon class="home-board-shape" points="84,47 196,47 252,140 196,233 84,233 28,140" filter="url(#homeBoardShadow)" />
+          <g class="home-board-grain">
+            <path d="M82 64 C112 58 158 70 198 63" />
+            <path d="M67 88 C111 82 171 96 214 86" />
+            <path d="M52 113 C105 107 174 122 229 111" />
+            <path d="M43 140 C102 133 179 148 237 138" />
+            <path d="M52 167 C108 161 174 176 229 165" />
+            <path d="M67 192 C113 186 168 200 214 190" />
+            <path d="M82 216 C113 210 162 221 198 215" />
+          </g>
+          <g class="home-board-holes">
+            <circle cx="140" cy="68" r="3" /><circle cx="140" cy="91" r="3" /><circle cx="140" cy="114" r="3" /><circle cx="140" cy="140" r="3" /><circle cx="140" cy="166" r="3" /><circle cx="140" cy="189" r="3" /><circle cx="140" cy="212" r="3" />
+            <circle cx="92" cy="92" r="3" /><circle cx="108" cy="103" r="3" /><circle cx="124" cy="114" r="3" />
+            <circle cx="188" cy="92" r="3" /><circle cx="172" cy="103" r="3" /><circle cx="156" cy="114" r="3" />
+            <circle cx="92" cy="188" r="3" /><circle cx="108" cy="177" r="3" /><circle cx="124" cy="166" r="3" />
+            <circle cx="188" cy="188" r="3" /><circle cx="172" cy="177" r="3" /><circle cx="156" cy="166" r="3" />
+            <circle cx="101" cy="140" r="3" /><circle cx="118" cy="140" r="3" /><circle cx="162" cy="140" r="3" /><circle cx="179" cy="140" r="3" />
+            <circle cx="140" cy="140" r="4" />
+          </g>
+          <g class="home-board-marbles">
+            <circle class="m-blue" cx="110" cy="65" r="6.5" /><circle class="m-blue" cx="130" cy="65" r="6.5" /><circle class="m-blue" cx="150" cy="65" r="6.5" /><circle class="m-blue" cx="170" cy="65" r="6.5" />
+            <circle class="m-white" cx="197" cy="72" r="6.5" /><circle class="m-white" cx="206" cy="87" r="6.5" /><circle class="m-white" cx="215" cy="102" r="6.5" /><circle class="m-white" cx="224" cy="116" r="6.5" />
+            <circle class="m-green" cx="224" cy="164" r="6.5" /><circle class="m-green" cx="215" cy="178" r="6.5" /><circle class="m-green" cx="206" cy="193" r="6.5" /><circle class="m-green" cx="197" cy="208" r="6.5" />
+            <circle class="m-black" cx="110" cy="215" r="6.5" /><circle class="m-black" cx="130" cy="215" r="6.5" /><circle class="m-black" cx="150" cy="215" r="6.5" /><circle class="m-black" cx="170" cy="215" r="6.5" />
+            <circle class="m-red" cx="56" cy="164" r="6.5" /><circle class="m-red" cx="65" cy="178" r="6.5" /><circle class="m-red" cx="74" cy="193" r="6.5" /><circle class="m-red" cx="83" cy="208" r="6.5" />
+            <circle class="m-yellow" cx="56" cy="116" r="6.5" /><circle class="m-yellow" cx="65" cy="102" r="6.5" /><circle class="m-yellow" cx="74" cy="87" r="6.5" /><circle class="m-yellow" cx="83" cy="72" r="6.5" />
+          </g>
+        </svg>
+        <h1 class="title marble-title" aria-label="Marbles">
+          <span class="marble-letter letter-red" aria-hidden="true">M</span><span class="marble-letter letter-yellow" aria-hidden="true">a</span><span class="marble-letter letter-green" aria-hidden="true">r</span><span class="marble-letter letter-blue" aria-hidden="true">b</span><span class="marble-letter letter-white" aria-hidden="true">l</span><span class="marble-letter letter-black" aria-hidden="true">e</span><span class="marble-letter letter-red" aria-hidden="true">s</span>
+        </h1>
         <div id="homeChoices" class="home-choices">
           <button id="createBtn" class="primary-button" type="button">Create new game</button>
           <div class="or">or</div>
@@ -27,7 +69,7 @@
         </div>
         <form id="nameForm" class="name-form" hidden>
           <label>
-            Your name
+            Username
             <input id="nameInput" type="text" autocomplete="given-name" maxlength="20" required />
           </label>
           <button type="submit" class="primary-button">Continue</button>
@@ -58,7 +100,7 @@
             <span class="section-label">Current Turn</span>
             <p id="turnLabel">Loading…</p>
           </div>
-          <button class="icon-button leave-button" id="newGameButton" type="button" aria-label="Leave game">
+          <button class="icon-button leave-button" id="resetGameButton" type="button" aria-label="Reset game" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 12a9 9 0 0 1 15.55-6.17" />
               <path d="M18.55 5.83V2.5" />
@@ -107,10 +149,13 @@
             <summary>Game info</summary>
             <div class="status" id="statusPanel"></div>
           </details>
+          <section class="admin-game-actions" id="adminGameActions" hidden aria-label="Admin game controls">
+            <button class="secondary-button" id="endGameButton" type="button">End game</button>
+          </section>
         </section>
       </section>
     </main>
 
-    <script type="module" src="client.js?v=6"></script>
+    <script type="module" src="client.js?v=10"></script>
   </body>
 </html>
