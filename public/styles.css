@@ -1048,3 +1048,20 @@ input::placeholder {
 .modal-card .primary-button {
   width: 100%;
 }
+
+@keyframes no-moves-flash-anim {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.03);
+    color: #ff9e9e;
+  }
+}
+
+.no-moves-flash {
+  animation: no-moves-flash-anim 0.8s ease-in-out infinite;
+  display: inline-block;
+}

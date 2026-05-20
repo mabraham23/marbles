@@ -410,6 +410,7 @@ function nextPlayer(state) {
 // Apply a move (mutates state). Returns metadata about what happened.
 // `move` is a move object returned by legalMoves. `roll` was the dice value.
 export function applyMove(state, move, roll) {
+  state.noMoveRoll = null;
   const movingMarble = state.marbles[move.marbleIdx];
   const beforeMarble = {
     player: movingMarble.player,
@@ -480,11 +481,17 @@ export function applyMove(state, move, roll) {
 export function rollAndCompute(state, dieValue) {
   state.pendingDieValue = dieValue;
   state.pendingRoll = dieValue;
+  state.noMoveRoll = null;
   const moves = legalMoves(state, state.currentPlayer, dieValue);
   if (moves.length === 0) {
     state.log.unshift(
       `${state.playerNames[state.currentPlayer]} rolled ${dieValue}: no move`,
     );
+    state.noMoveRoll = {
+      player: state.currentPlayer,
+      dieValue: dieValue,
+      rollId: Math.random().toString(36).substring(2),
+    };
     state.pendingRoll = null;
     state.pendingDieValue = dieValue;
     if (dieValue !== 1 && dieValue !== 6) nextPlayer(state);

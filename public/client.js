@@ -68,6 +68,8 @@ const ui = {
   pendingMoves: null, // moves for current roll (current player only)
   socket: null,
   connected: false,
+  isNoMoveDelayActive: false,
+  lastProcessedNoMoveRollId: null,
 };
 
 let diceSpinTimer = null;
@@ -231,10 +233,17 @@ function handleServerMessage(msg) {
       renderLobby();
       break;
     case "gameState":
-      ui.game = msg.state;
+      const state = msg.state;
+      ui.game = state;
       ui.pendingMoves = msg.movesFor === ui.myName ? msg.moves || null : null;
       if (ui.view !== "game") showView("game");
-      renderGame();
+
+      if (state.noMoveRoll && state.noMoveRoll.rollId !== ui.lastProcessedNoMoveRollId) {
+        ui.lastProcessedNoMoveRollId = state.noMoveRoll.rollId;
+        triggerNoMoveSequence(state.noMoveRoll);
+      } else if (!ui.isNoMoveDelayActive) {
+        renderGame();
+      }
       break;
     case "error":
       // Server restarted (cold start) — room no longer exists. Surface a
@@ -374,6 +383,7 @@ function localSeat() {
 }
 
 function renderGame() {
+  if (ui.isNoMoveDelayActive) return;
   const state = ui.game;
   if (!state) return;
   const cp = state.currentPlayer;
@@ -525,6 +535,40 @@ function stopDiceRollAnimation(finalValue) {
   diceSpinTimer = null;
   rollButton.classList.remove("rolling");
   setDiceFace(finalValue);
+}
+
+function triggerNoMoveSequence(noMoveRoll) {
+  ui.isNoMoveDelayActive = true;
+
+  // Stop any dice roll animations immediately and show the rolled face
+  stopDiceRollAnimation(noMoveRoll.dieValue);
+
+  // Disable the roll button
+  rollButton.disabled = true;
+
+  // Clear moves panel
+  movesPanel.replaceChildren();
+
+  // Update the turn text and status text to show "No Moves!"
+  const rollingPlayerName = ui.game.playerNames[noMoveRoll.player];
+  const seat = ui.game.seatColors[noMoveRoll.player];
+
+  // Set dice colors to rolling player's colors
+  rollButton.style.setProperty("--dice-color", PLAYER_COLORS[seat]);
+  rollButton.style.setProperty("--dice-stroke", PLAYER_STROKES[seat]);
+  rollButton.style.setProperty("--dice-ink", tokenLabelColor(seat));
+
+  // Show "rolled X" on the dice label
+  dieValueEl.textContent = `Rolled ${noMoveRoll.dieValue}`;
+
+  // Change the turn text to indicate they rolled but have no move, styled beautifully
+  turnLabel.innerHTML = `<span class="current-player no-moves-flash" style="--player-color:${PLAYER_COLORS[seat]};--player-stroke:${PLAYER_STROKES[seat]};--player-ink:${tokenLabelColor(seat)}">${escapeHTML(rollingPlayerName)}: No Valid Moves!</span>`;
+
+  // After 2.5 seconds, reset the active delay and run the normal renderGame
+  setTimeout(() => {
+    ui.isNoMoveDelayActive = false;
+    renderGame();
+  }, 2500);
 }
 
 // --- Roll button ---
