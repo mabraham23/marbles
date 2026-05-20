@@ -399,6 +399,9 @@ function renderGame() {
 
   // Dice
   const canRoll = !state.gameOver && isMyTurn && state.pendingRoll == null;
+  if (state.pendingDieValue == null && diceSpinTimer) {
+    stopDiceRollAnimation(null);
+  }
   rollButton.disabled = !canRoll || Boolean(diceSpinTimer);
   if (state.pendingDieValue != null) {
     stopDiceRollAnimation(state.pendingDieValue);
