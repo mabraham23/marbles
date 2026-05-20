@@ -23,6 +23,7 @@ const errorBanner = document.querySelector("#errorBanner");
 const createBtn = document.querySelector("#createBtn");
 const joinForm = document.querySelector("#joinForm");
 const joinCodeInput = document.querySelector("#joinCodeInput");
+const ROOM_CODE_LENGTH = 4;
 
 const nameForm = document.querySelector("#nameForm");
 const nameInput = document.querySelector("#nameInput");
@@ -153,13 +154,23 @@ function handleServerMessage(msg) {
 // --- Home / Join flow ---
 $on(createBtn, "click", () => send({ type: "createRoom" }));
 
-$on(joinForm, "submit", (e) => {
-  e.preventDefault();
-  const code = joinCodeInput.value.trim().toUpperCase();
-  if (!code) return;
+function beginJoinWithCode(code) {
+  if (code.length !== ROOM_CODE_LENGTH) return;
+  if (ui.view === "name" && ui.roomCode === code) return;
   ui.roomCode = code;
   history.replaceState(null, "", `${location.pathname}?room=${code}`);
   showView("name");
+}
+
+$on(joinCodeInput, "input", () => {
+  const normalized = joinCodeInput.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, ROOM_CODE_LENGTH);
+  joinCodeInput.value = normalized;
+  beginJoinWithCode(normalized);
+});
+
+$on(joinForm, "submit", (e) => {
+  e.preventDefault();
+  beginJoinWithCode(joinCodeInput.value.trim().toUpperCase());
 });
 
 $on(nameForm, "submit", (e) => {
