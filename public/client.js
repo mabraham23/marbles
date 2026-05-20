@@ -711,9 +711,13 @@ function renderChat() {
 function updateChatBadge() {
   if (!chatBadge) return;
   if (ui.unreadCount > 0) {
-    chatBadge.textContent = ui.unreadCount > 9 ? "9+" : ui.unreadCount;
+    const countText = ui.unreadCount > 9 ? "9+" : String(ui.unreadCount);
+    chatBadge.dataset.count = countText;
+    chatBadge.textContent = "";
     chatBadge.hidden = false;
   } else {
+    delete chatBadge.dataset.count;
+    chatBadge.textContent = "";
     chatBadge.hidden = true;
   }
 }
@@ -722,6 +726,7 @@ function toggleChat() {
   if (!chatDrawer) return;
   ui.isChatOpen = !ui.isChatOpen;
   if (ui.isChatOpen) {
+    updateChatViewportInset();
     chatDrawer.hidden = false;
     if (chatToggleBtn) chatToggleBtn.hidden = true;
     // Force a reflow
@@ -729,13 +734,14 @@ function toggleChat() {
     chatDrawer.classList.add("open");
     ui.unreadCount = 0;
     updateChatBadge();
-    if (chatInput) chatInput.focus();
+    if (chatInput && !isMobileChatViewport()) chatInput.focus();
     if (chatMessages) {
       setTimeout(() => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
       }, 50);
     }
   } else {
+    if (chatInput) chatInput.blur();
     chatDrawer.classList.remove("open");
     if (chatToggleBtn && (ui.view === "lobby" || ui.view === "game")) {
       chatToggleBtn.hidden = false;
@@ -744,6 +750,18 @@ function toggleChat() {
       if (!ui.isChatOpen) chatDrawer.hidden = true;
     }, 350);
   }
+}
+
+function isMobileChatViewport() {
+  return window.matchMedia?.("(max-width: 640px)").matches || window.matchMedia?.("(pointer: coarse)").matches;
+}
+
+function updateChatViewportInset() {
+  const viewport = window.visualViewport;
+  const inset = viewport
+    ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+    : 0;
+  document.documentElement.style.setProperty("--chat-keyboard-inset", `${Math.round(inset)}px`);
 }
 
 $on(chatToggleBtn, "click", toggleChat);
@@ -762,13 +780,17 @@ $on(chatForm, "submit", (e) => {
 
 // Auto-scroll when keyboard opens on mobile devices
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", () => {
+  const handleChatViewportChange = () => {
+    updateChatViewportInset();
     if (ui.isChatOpen && chatMessages) {
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
-  });
+  };
+  window.visualViewport.addEventListener("resize", handleChatViewportChange);
+  window.visualViewport.addEventListener("scroll", handleChatViewportChange);
 }
 $on(chatInput, "focus", () => {
+  updateChatViewportInset();
   setTimeout(() => {
     if (ui.isChatOpen && chatMessages) {
       chatMessages.scrollTop = chatMessages.scrollHeight;
