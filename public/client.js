@@ -1,34 +1,18 @@
 // Client: rendering, animation, WebSocket plumbing.
 import {
-  FINISH_LEN,
-  MARBLES_PER_PLAYER,
-  SIDE_ROW_LEN,
-  ARM_ROW_LEN,
-  APEX_LEN,
   MODULE_LEN,
   TRACK_LEN,
-  MAX_TRACK_PROGRESS,
-  CENTER_PROGRESS,
-  CORNER_PROGRESSES,
-  PLAYER_NAMES,
-  PLAYER_SHORT,
   PLAYER_COLORS,
   PLAYER_STROKES,
-  PLACE,
-  MODES,
-  validModes,
   modeLabel,
-  marbleToken,
 } from "./shared/rules.js";
 
-const ns = "http://www.w3.org/2000/svg";
-const center = { x: 210, y: 222 };
-const boardRadius = 190;
-const trackRadius = 128;
-const CORNER_INSET = 130;
-
-const boardPoints = makeHexPoints(boardRadius, 0);
-const baseTrackPoints = makeTrackPoints();
+import {
+  renderBoardLayers,
+  buildMovePath as renderBuildMovePath,
+  animateAlongPath as renderAnimateAlongPath,
+  tokenLabelColor,
+} from "./shared/board-render.js?v=2";
 
 // DOM refs
 const homeView = document.querySelector("#homeView");
@@ -252,85 +236,6 @@ function escapeHTML(s) {
   return s.replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
-// --- Game rendering ---
-function svgEl(tag, attrs = {}) {
-  const node = document.createElementNS(ns, tag);
-  Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
-  return node;
-}
-
-function makeHexPoints(radius, offsetDegrees) {
-  return Array.from({ length: 6 }, (_, index) => {
-    const angle = ((offsetDegrees + index * 60) * Math.PI) / 180;
-    return {
-      x: center.x + Math.cos(angle) * radius,
-      y: center.y + Math.sin(angle) * radius,
-    };
-  });
-}
-
-function makeTrackPoints() {
-  const sideRows = makeSideRows();
-  const corners = makeCornerTargets();
-  const points = [];
-  for (let side = 0; side < 6; side += 1) {
-    points.push(...makeArmPoints(sideRows[side], 0, "in", corners[(side + 1) % 6]));
-    points.push(...sideRows[side]);
-    points.push(...makeArmPoints(sideRows[side], SIDE_ROW_LEN - 1, "out", corners[(side + 2) % 6]));
-    points.push(corners[(side + 2) % 6]);
-  }
-  return points;
-}
-
-function makeCornerTargets() {
-  return boardPoints.map((corner) => {
-    const toCenter = normalize({ x: center.x - corner.x, y: center.y - corner.y });
-    return {
-      x: corner.x + toCenter.x * CORNER_INSET,
-      y: corner.y + toCenter.y * CORNER_INSET,
-    };
-  });
-}
-
-function makeArmPoints(sideRow, endpointIndex, direction, target) {
-  const endpoint = sideRow[endpointIndex];
-  const segments = ARM_ROW_LEN + 1;
-  return Array.from({ length: ARM_ROW_LEN }, (_, index) => {
-    const t = (index + 1) / segments;
-    return direction === "in" ? lerpPoint(target, endpoint, 1 - t) : lerpPoint(endpoint, target, t);
-  });
-}
-
-function makeSideRows() {
-  const normalAngles = [90, 150, 210, 270, 330, 30];
-  const rowSpacing = 14;
-  return normalAngles.map((degrees) => {
-    const angle = (degrees * Math.PI) / 180;
-    const normal = { x: Math.cos(angle), y: Math.sin(angle) };
-    const sideDirection = { x: -normal.y, y: normal.x };
-    const sideCenter = {
-      x: center.x + normal.x * trackRadius,
-      y: center.y + normal.y * trackRadius,
-    };
-    return Array.from({ length: SIDE_ROW_LEN }, (_, index) => {
-      const offset = (index - (SIDE_ROW_LEN - 1) / 2) * rowSpacing;
-      return {
-        x: sideCenter.x + sideDirection.x * offset,
-        y: sideCenter.y + sideDirection.y * offset,
-      };
-    });
-  });
-}
-
-function lerpPoint(a, b, t) {
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-}
-
-function normalize(vector) {
-  const length = Math.hypot(vector.x, vector.y) || 1;
-  return { x: vector.x / length, y: vector.y / length };
-}
-
 // --- Rotation helpers (local player at bottom) ---
 function localPlayerIdx() {
   if (!ui.game || !ui.myName) return null;
@@ -341,72 +246,6 @@ function localSeat() {
   const lp = localPlayerIdx();
   if (lp === null || lp < 0) return 0;
   return ui.game.seatColors[lp];
-}
-
-function visualSeatForPlayer(player) {
-  if (!ui.game) return player;
-  const actualSeat = ui.game.seatColors[player];
-  return (actualSeat - localSeat() + 6) % 6;
-}
-
-function visualTrackIndex(absTrackIndex) {
-  return (absTrackIndex - localSeat() * MODULE_LEN + TRACK_LEN) % TRACK_LEN;
-}
-
-function trackPoint(absTrackIndex) {
-  return baseTrackPoints[visualTrackIndex(absTrackIndex)];
-}
-
-function visualSideCenter(player) {
-  const visSeat = visualSeatForPlayer(player);
-  const sideCenterIndex = visSeat * MODULE_LEN + ARM_ROW_LEN + Math.floor(SIDE_ROW_LEN / 2);
-  return baseTrackPoints[sideCenterIndex];
-}
-
-function finishPoint(player, slot) {
-  const sideCenter = visualSideCenter(player);
-  return lerpPoint(sideCenter, center, 0.155 + slot * 0.11);
-}
-
-function homePoint(player, index) {
-  const sideCenter = visualSideCenter(player);
-  const away = normalize({ x: sideCenter.x - center.x, y: sideCenter.y - center.y });
-  let sideDirection = normalize({ x: away.y, y: -away.x });
-  const readsRightToLeft = Math.abs(sideDirection.x) >= Math.abs(sideDirection.y) && sideDirection.x < 0;
-  const readsBottomToTop = Math.abs(sideDirection.y) > Math.abs(sideDirection.x) && sideDirection.y < 0;
-  if (readsRightToLeft || readsBottomToTop) {
-    sideDirection = { x: -sideDirection.x, y: -sideDirection.y };
-  }
-  const rowOutset = 20;
-  const rowCenter = { x: sideCenter.x + away.x * rowOutset, y: sideCenter.y + away.y * rowOutset };
-  const spacing = 22;
-  const offset = (index - (MARBLES_PER_PLAYER - 1) / 2) * spacing;
-  return { x: rowCenter.x + sideDirection.x * offset, y: rowCenter.y + sideDirection.y * offset };
-}
-
-function tokenLabelColor(seat) {
-  return seat === 2 || seat === 4 || seat === 5 ? "#1d2939" : "#ffffff";
-}
-
-function tokenRadius(place) {
-  if (place === PLACE.HOME) return 9;
-  if (place === PLACE.FINISH) return 6.5;
-  if (place === PLACE.CENTER) return 9;
-  return 6.5;
-}
-
-function pointForMarbleState(player, place, progress, finish, index) {
-  if (place === PLACE.HOME) return homePoint(player, index);
-  if (place === PLACE.CENTER) return center;
-  if (place === PLACE.FINISH) return finishPoint(player, finish);
-  // TRACK
-  const start = ui.game.starts[player];
-  const absIdx = (start + progress) % TRACK_LEN;
-  return trackPoint(absIdx);
-}
-
-function pointForMarble(marble) {
-  return pointForMarbleState(marble.player, marble.place, marble.progress, marble.finish, marble.index);
 }
 
 function renderGame() {
@@ -434,7 +273,13 @@ function renderGame() {
   rollButton.disabled = !canRoll || Boolean(diceSpinTimer);
   if (state.pendingDieValue != null) {
     stopDiceRollAnimation(state.pendingDieValue);
-    dieValueEl.textContent = isMyTurn && ui.pendingMoves?.length ? `Rolled ${state.pendingDieValue} · choose a move` : `Rolled ${state.pendingDieValue}`;
+    if (isMyTurn && ui.pendingMoves?.length) {
+      dieValueEl.textContent = `Rolled ${state.pendingDieValue} · choose a move`;
+    } else if (canRoll) {
+      dieValueEl.textContent = `Rolled ${state.pendingDieValue} · tap again`;
+    } else {
+      dieValueEl.textContent = `Rolled ${state.pendingDieValue}`;
+    }
   } else if (!diceSpinTimer) {
     setDiceFace(null);
     dieValueEl.textContent = canRoll ? "Tap the dice to roll" : "Waiting for roll";
@@ -455,7 +300,7 @@ function renderGame() {
       });
       movesPanel.append(b);
     });
-  } else if (isMyTurn && state.pendingDieValue != null) {
+  } else if (isMyTurn && state.pendingDieValue != null && !canRoll) {
     const empty = document.createElement("p");
     empty.className = "moves-note";
     empty.textContent = "No move available.";
@@ -485,222 +330,22 @@ function renderStatus() {
 }
 
 function renderBoard() {
-  const state = ui.game;
-  const boardPointString = boardPoints.map((p) => `${p.x},${p.y}`).join(" ");
-  boardShape.setAttribute("points", boardPointString);
-  boardClipShape.setAttribute("points", boardPointString);
-  renderWoodGrain();
-  trackLayer.replaceChildren();
-  finishLayer.replaceChildren();
-  homeLayer.replaceChildren();
-  tokenLayer.replaceChildren();
-  // Track holes — fixed background positions (regardless of rotation)
-  const startSet = new Map(); // absTrackIndex -> seat
-  for (let p = 0; p < state.playerCount; p += 1) {
-    startSet.set(state.starts[p], state.seatColors[p]);
-  }
-  for (let i = 0; i < TRACK_LEN; i += 1) {
-    const point = baseTrackPoints[visualTrackIndex(i)];
-    const seat = startSet.get(i);
-    const circle = svgEl("circle", {
-      class: seat !== undefined ? "hole start-hole" : "hole",
-      cx: point.x,
-      cy: point.y,
-      r: 5.1,
-    });
-    if (seat !== undefined) circle.setAttribute("stroke", PLAYER_COLORS[seat]);
-    trackLayer.append(circle);
-  }
-  renderCornerLabels(state);
-  // Center hole
-  finishLayer.append(svgEl("circle", { class: "hole center-hole", cx: center.x, cy: center.y, r: 5.1 }));
-  // Finish lanes + home pads (per active player)
-  for (let player = 0; player < state.playerCount; player += 1) {
-    const seat = state.seatColors[player];
-    for (let slot = 0; slot < FINISH_LEN; slot += 1) {
-      const point = finishPoint(player, slot);
-      finishLayer.append(svgEl("circle", { class: "finish-hole", cx: point.x, cy: point.y, r: 6, stroke: PLAYER_COLORS[seat] }));
-    }
-    for (let index = 0; index < MARBLES_PER_PLAYER; index += 1) {
-      const point = homePoint(player, index);
-      homeLayer.append(svgEl("circle", { class: "home-pad", cx: point.x, cy: point.y, r: 7.5 }));
-    }
-  }
-  // Marbles
-  state.marbles.forEach((m) => drawToken(m));
-}
-
-function renderCornerLabels(state) {
-  const playerStart = state.starts[state.currentPlayer];
-  if (playerStart === undefined) return;
-
-  CORNER_PROGRESSES.forEach((cornerProgress, index) => {
-    const point = trackPoint((playerStart + cornerProgress) % TRACK_LEN);
-    const away = normalize({ x: point.x - center.x, y: point.y - center.y });
-    const labelPoint = {
-      x: point.x + away.x * 15,
-      y: point.y + away.y * 15,
-    };
-    trackLayer.append(svgEl("circle", {
-      class: "corner-label-bg",
-      cx: labelPoint.x,
-      cy: labelPoint.y,
-      r: 7.2,
-    }));
-    const text = svgEl("text", {
-      class: "corner-label",
-      x: labelPoint.x,
-      y: labelPoint.y + 0.4,
-    });
-    text.textContent = String(index + 1);
-    trackLayer.append(text);
-  });
-}
-
-function renderWoodGrain() {
-  woodLayer.replaceChildren();
-  for (let y = 70; y <= 382; y += 12) {
-    const wave = 3 + ((y / 12) % 4);
-    const d = [
-      `M 28 ${y.toFixed(1)}`,
-      `C 92 ${(y - wave).toFixed(1)} 126 ${(y + wave).toFixed(1)} 190 ${y.toFixed(1)}`,
-      `S 298 ${(y - wave).toFixed(1)} 392 ${y.toFixed(1)}`,
-    ].join(" ");
-    woodLayer.append(svgEl("path", { class: "wood-line", d }));
-    if (y % 36 === 10) {
-      woodLayer.append(svgEl("path", {
-        class: "wood-line soft",
-        d: `M 42 ${y + 5} C 118 ${y + 1} 190 ${y + 10} 276 ${y + 4} S 350 ${y + 2} 382 ${y + 6}`,
-      }));
-    }
-  }
-}
-
-function drawToken(marble) {
-  const point = pointForMarble(marble);
-  const group = svgEl("g", { "aria-label": marbleToken(marble) });
-  group.append(svgEl("circle", {
-    class: "token",
-    cx: point.x,
-    cy: point.y,
-    r: tokenRadius(marble.place),
-    fill: PLAYER_COLORS[marble.seat],
-    stroke: PLAYER_STROKES[marble.seat],
-  }));
-  const label = svgEl("text", {
-    class: "token-label",
-    x: point.x,
-    y: point.y + 0.4,
-    fill: tokenLabelColor(marble.seat),
-  });
-  label.textContent = String(marble.index + 1);
-  group.append(label);
-  tokenLayer.append(group);
-}
-
-// --- Animation ---
-function buildMovePathFromLast(lastMove) {
-  const marble = ui.game.marbles[lastMove.marbleIdx];
-  const player = marble.player;
-  const trackHole = (progress) => baseTrackPoints[visualTrackIndex((ui.game.starts[player] + progress) % TRACK_LEN)];
-
-  const fromPoint = pointForMarbleState(player, lastMove.before.place, lastMove.before.progress, lastMove.before.finish, marble.index);
-  const points = [fromPoint];
-
-  if (lastMove.before.place === PLACE.HOME && lastMove.targetPlace === PLACE.TRACK) {
-    points.push(trackHole(lastMove.targetProgress));
-    return points;
-  }
-  if (lastMove.before.place === PLACE.TRACK && lastMove.targetPlace === PLACE.TRACK) {
-    const fromIdx = CORNER_PROGRESSES.indexOf(lastMove.before.progress);
-    const toIdx = CORNER_PROGRESSES.indexOf(lastMove.targetProgress);
-    const isCornerJump = fromIdx >= 0 && toIdx >= 0 && toIdx > fromIdx && lastMove.targetProgress - lastMove.before.progress > 1;
-    if (isCornerJump) {
-      for (let i = fromIdx + 1; i <= toIdx; i += 1) points.push(trackHole(CORNER_PROGRESSES[i]));
-    } else {
-      for (let p = lastMove.before.progress + 1; p <= lastMove.targetProgress; p += 1) points.push(trackHole(p));
-    }
-    return points;
-  }
-  if (lastMove.before.place === PLACE.TRACK && lastMove.targetPlace === PLACE.CENTER) {
-    for (let p = lastMove.before.progress + 1; p < CENTER_PROGRESS; p += 1) points.push(trackHole(p));
-    points.push(center);
-    return points;
-  }
-  if (lastMove.before.place === PLACE.TRACK && lastMove.targetPlace === PLACE.FINISH) {
-    for (let p = lastMove.before.progress + 1; p <= MAX_TRACK_PROGRESS; p += 1) points.push(trackHole(p));
-    for (let s = 0; s <= lastMove.targetFinish; s += 1) points.push(finishPoint(player, s));
-    return points;
-  }
-  if (lastMove.before.place === PLACE.FINISH && lastMove.targetPlace === PLACE.FINISH) {
-    for (let s = lastMove.before.finish + 1; s <= lastMove.targetFinish; s += 1) points.push(finishPoint(player, s));
-    return points;
-  }
-  if (lastMove.before.place === PLACE.CENTER && lastMove.targetPlace === PLACE.TRACK) {
-    points.push(trackHole(lastMove.targetProgress));
-    return points;
-  }
-  return points;
-}
-
-function findTokenElement(marble) {
-  return Array.from(tokenLayer.querySelectorAll("g")).find(
-    (g) => g.getAttribute("aria-label") === marbleToken(marble),
+  renderBoardLayers(
+    { boardShape, boardClipShape, woodLayer, trackLayer, finishLayer, homeLayer, tokenLayer },
+    ui.game,
+    localSeat(),
   );
 }
 
-function setTokenPosition(token, x, y) {
-  const circle = token.querySelector("circle");
-  const text = token.querySelector("text");
-  circle.setAttribute("cx", x);
-  circle.setAttribute("cy", y);
-  text.setAttribute("x", x);
-  text.setAttribute("y", y + 0.4);
-}
-
-let activeAnimationToken = 0;
 let lastAnimatedMoveSig = null;
 
 function animateLastMove(lastMove) {
-  // Avoid replaying the same lastMove if state arrives again
   const sig = JSON.stringify(lastMove);
   if (sig === lastAnimatedMoveSig) return;
   lastAnimatedMoveSig = sig;
-  const path = buildMovePathFromLast(lastMove);
+  const path = renderBuildMovePath(ui.game, lastMove, localSeat());
   const marble = ui.game.marbles[lastMove.marbleIdx];
-  animateAlongPath(marble, path, () => {});
-}
-
-function animateAlongPath(marble, path, onDone) {
-  activeAnimationToken += 1;
-  const myToken = activeAnimationToken;
-  if (path.length < 2) { onDone(); return; }
-  const tokenEl = findTokenElement(marble);
-  if (!tokenEl) { onDone(); return; }
-  const stepMs = 90;
-  const subStepMs = 18;
-  const subSteps = Math.max(1, Math.round(stepMs / subStepMs));
-  let seg = 0;
-  let sub = 0;
-  function tick() {
-    if (myToken !== activeAnimationToken) return;
-    const a = path[seg];
-    const b = path[seg + 1];
-    const t = sub / subSteps;
-    setTokenPosition(tokenEl, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
-    sub += 1;
-    if (sub > subSteps) {
-      sub = 0;
-      seg += 1;
-      if (seg >= path.length - 1) {
-        setTokenPosition(tokenEl, path[path.length - 1].x, path[path.length - 1].y);
-        onDone();
-        return;
-      }
-    }
-    setTimeout(tick, subStepMs);
-  }
-  tick();
+  renderAnimateAlongPath(tokenLayer, marble, path, () => {});
 }
 
 function setDiceFace(value) {
