@@ -19,6 +19,11 @@ import {
 } from "../public/shared/rules.js";
 
 import { roomStore } from "./storage.js";
+import {
+  EMPTY_ROOM_TTL_MS,
+  ROOM_GC_INTERVAL_MS,
+  roomShouldExpire,
+} from "./room-lifecycle.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const PUBLIC_DIR = resolve(__filename, "..", "..", "public");
@@ -54,6 +59,16 @@ function getConnections(code) {
 
 function deleteConnections(code) {
   roomConnections.delete(code);
+}
+
+async function deleteRoomEverywhere(code) {
+  const conn = getConnections(code);
+  for (const socket of [...conn.socketsByName.values(), ...conn.preJoinSockets]) {
+    try { socket.close(); } catch { /* ignore */ }
+  }
+  await roomStore.delete(code);
+  deleteConnections(code);
+  roomJoinQueues.delete(code);
 }
 
 async function withRoomJoinQueue(code, task) {
@@ -104,6 +119,8 @@ async function createRoom() {
     pendingMoves: null,
     pendingMovesFor: null,
     createdAt: Date.now(),
+    lastMoveAt: null,
+    completedAt: null,
   };
 
   await roomStore.set(code, room);
@@ -114,8 +131,7 @@ async function createRoom() {
 async function deleteRoomIfEmpty(room) {
   const conn = getConnections(room.code);
   if (conn.socketsByName.size === 0 && conn.preJoinSockets.size === 0 && room.players.length === 0) {
-    await roomStore.delete(room.code);
-    deleteConnections(room.code);
+    await deleteRoomEverywhere(room.code);
   }
 }
 
@@ -341,6 +357,8 @@ async function handleStartGame(socket) {
   room.phase = "playing";
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.lastMoveAt = Date.now();
+  room.completedAt = null;
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -370,6 +388,8 @@ async function handleResetGame(socket) {
   room.phase = "playing";
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.lastMoveAt = Date.now();
+  room.completedAt = null;
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -388,6 +408,8 @@ async function handleEndGame(socket) {
   room.gameState = null;
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.lastMoveAt = null;
+  room.completedAt = null;
 
   await roomStore.set(room.code, room);
   await broadcastLobby(room);
@@ -413,6 +435,8 @@ async function handleRoll(socket) {
     room.pendingMoves = null;
     room.pendingMovesFor = null;
   }
+  room.lastMoveAt = Date.now();
+  if (state.gameOver && !room.completedAt) room.completedAt = room.lastMoveAt;
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -443,6 +467,8 @@ async function handleSubmitMove(socket, msg) {
   if (!stillLegal) return sendError(socket, "Move no longer legal");
 
   applyMove(room.gameState, move, room.gameState.pendingDieValue);
+  room.lastMoveAt = Date.now();
+  if (room.gameState.gameOver) room.completedAt = room.lastMoveAt;
   room.pendingMoves = null;
   room.pendingMovesFor = null;
 
@@ -597,7 +623,7 @@ const heartbeatTimer = setInterval(() => {
 heartbeatTimer.unref();
 wss.on("close", () => clearInterval(heartbeatTimer));
 
-// Periodic GC: drop empty rooms older than 1h.
+// Periodic GC: delete completed games, inactive games, and abandoned empty rooms.
 setInterval(async () => {
   try {
     const now = Date.now();
@@ -605,15 +631,17 @@ setInterval(async () => {
     for (const room of rooms) {
       const conn = getConnections(room.code);
       const live = conn.socketsByName.size + conn.preJoinSockets.size;
-      if (live === 0 && now - room.createdAt > 60 * 60 * 1000) {
-        await roomStore.delete(room.code);
-        deleteConnections(room.code);
+      if (
+        roomShouldExpire(room, now) ||
+        (live === 0 && now - room.createdAt > EMPTY_ROOM_TTL_MS)
+      ) {
+        await deleteRoomEverywhere(room.code);
       }
     }
   } catch (err) {
     console.error("Error in GC interval:", err);
   }
-}, 5 * 60 * 1000).unref();
+}, ROOM_GC_INTERVAL_MS).unref();
 
 httpServer.listen(PORT, () => {
   console.log(`Marbles server listening on http://localhost:${PORT}`);
