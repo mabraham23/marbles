@@ -723,15 +723,23 @@ function toggleChat() {
   ui.isChatOpen = !ui.isChatOpen;
   if (ui.isChatOpen) {
     chatDrawer.hidden = false;
+    if (chatToggleBtn) chatToggleBtn.hidden = true;
     // Force a reflow
     chatDrawer.offsetHeight;
     chatDrawer.classList.add("open");
     ui.unreadCount = 0;
     updateChatBadge();
     if (chatInput) chatInput.focus();
-    if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+    if (chatMessages) {
+      setTimeout(() => {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }, 50);
+    }
   } else {
     chatDrawer.classList.remove("open");
+    if (chatToggleBtn && (ui.view === "lobby" || ui.view === "game")) {
+      chatToggleBtn.hidden = false;
+    }
     setTimeout(() => {
       if (!ui.isChatOpen) chatDrawer.hidden = true;
     }, 350);
@@ -750,6 +758,22 @@ $on(chatForm, "submit", (e) => {
   if (!text) return;
   send({ type: "chat", text });
   chatInput.value = "";
+});
+
+// Auto-scroll when keyboard opens on mobile devices
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => {
+    if (ui.isChatOpen && chatMessages) {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+  });
+}
+$on(chatInput, "focus", () => {
+  setTimeout(() => {
+    if (ui.isChatOpen && chatMessages) {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+  }, 300);
 });
 
 init();
