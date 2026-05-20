@@ -221,16 +221,53 @@ export function legalMoves(state, player, roll) {
           state.lastMove.before.player === player
         ) {
           const ownProgresses = ownTrackProgresses(state, player);
-          const pathBlocked = ownProgresses.has(75) || ownProgresses.has(74);
+          const pathBlocked = ownProgresses.has(83) || ownProgresses.has(82) || ownProgresses.has(81);
           if (!pathBlocked) {
             moves.push({
               marbleIdx,
               label: `${marbleToken(marble)} moves backward to gateway`,
               targetPlace: PLACE.TRACK,
-              targetProgress: MAX_TRACK_PROGRESS - 1, // 74
+              targetProgress: 81,
             });
           }
         }
+      }
+
+      // Handle marbles that went backward to progress 81 or 82
+      if (marble.progress === 81 || marble.progress === 82) {
+        const nextProgress = marble.progress + roll;
+        if (nextProgress === 82) {
+          const abs = (startForPlayer(state, player) + 82) % TRACK_LEN;
+          const occupant = marbleAtTrack(state, abs);
+          if (!occupant || occupant.player !== player) {
+            moves.push({
+              marbleIdx,
+              label: `${marbleToken(marble)} moves 1`,
+              targetPlace: PLACE.TRACK,
+              targetProgress: 82,
+            });
+          }
+        } else {
+          const finishSlot = nextProgress - 83;
+          if (finishSlot >= 0 && finishSlot < FINISH_LEN) {
+            const finishes = ownFinishSlots(state, player);
+            const occupiedTrack = ownTrackProgresses(state, player);
+            const trackBlocked = nextProgress > 81 && occupiedTrack.has(82);
+            let finishBlocked = false;
+            for (let slot = 0; slot <= finishSlot; slot += 1) {
+              if (finishes.has(slot)) finishBlocked = true;
+            }
+            if (!trackBlocked && !finishBlocked) {
+              moves.push({
+                marbleIdx,
+                label: `${marbleToken(marble)} enters finish ${finishSlot + 1}`,
+                targetPlace: PLACE.FINISH,
+                targetFinish: finishSlot,
+              });
+            }
+          }
+        }
+        return;
       }
 
       if (marble.progress < CENTER_PROGRESS && marble.progress + roll === CENTER_PROGRESS) {

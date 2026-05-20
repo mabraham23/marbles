@@ -194,16 +194,16 @@ test("backward-3 rule: eligibility and execution on rolling 3 immediately after 
   const moves3 = rollAndCompute(state, 3);
   const backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
   assert.ok(backwardMove, "expected backward-to-gateway move option");
-  assert.equal(backwardMove.targetProgress, 74);
+  assert.equal(backwardMove.targetProgress, 81);
 
   // 3. Apply the backward move
   const res = applyMove(state, backwardMove, 3);
-  assert.equal(state.marbles[0].progress, 74);
+  assert.equal(state.marbles[0].progress, 81);
   assert.equal(res.wasReroll, false, "3 is not a reroll");
   assert.equal(state.currentPlayer, 1, "turn should advance to Blue");
 });
 
-test("backward-3 rule: blocked when own marble is at progress 75 or 74", () => {
+test("backward-3 rule: blocked when own marble is at progress 83, 82, or 81", () => {
   const state = createInitialState({
     playerCount: 2,
     mode: MODES.SINGLE,
@@ -214,23 +214,29 @@ test("backward-3 rule: blocked when own marble is at progress 75 or 74", () => {
   const moves6 = rollAndCompute(state, 6);
   applyMove(state, moves6[0], 6);
 
-  // Position another Black marble at progress 75
+  // Position another Black marble at progress 83
   state.marbles[1].place = PLACE.TRACK;
-  state.marbles[1].progress = 75;
+  state.marbles[1].progress = 83;
 
-  // Black rolls a 3. Backward move should be blocked by marble at progress 75.
+  // Black rolls a 3. Backward move should be blocked by marble at progress 83.
   const moves3 = rollAndCompute(state, 3);
   let backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
-  assert.equal(backwardMove, undefined, "should not allow backward move when progress 75 is occupied");
+  assert.equal(backwardMove, undefined, "should not allow backward move when progress 83 is occupied");
 
-  // Move that blocking marble to progress 74 instead
-  state.marbles[1].progress = 74;
+  // Move that blocking marble to progress 82 instead
+  state.marbles[1].progress = 82;
   const moves3_2 = legalMoves(state, 0, 3);
   backwardMove = moves3_2.find((m) => m.label.includes("backward to gateway"));
-  assert.equal(backwardMove, undefined, "should not allow backward move when target 74 is occupied by own marble");
+  assert.equal(backwardMove, undefined, "should not allow backward move when progress 82 is occupied");
+
+  // Move that blocking marble to progress 81 instead
+  state.marbles[1].progress = 81;
+  const moves3_3 = legalMoves(state, 0, 3);
+  backwardMove = moves3_3.find((m) => m.label.includes("backward to gateway"));
+  assert.equal(backwardMove, undefined, "should not allow backward move when target progress 81 is occupied");
 });
 
-test("backward-3 rule: bumps opponent at progress 74", () => {
+test("backward-3 rule: bumps opponent at progress 81", () => {
   const state = createInitialState({
     playerCount: 2,
     mode: MODES.SINGLE,
@@ -241,9 +247,9 @@ test("backward-3 rule: bumps opponent at progress 74", () => {
   const moves6 = rollAndCompute(state, 6);
   applyMove(state, moves6[0], 6);
 
-  // Place Blue's marble at absolute index corresponding to Black's progress 74
-  // Black's start index is 8. Black's progress 74 is (8 + 74) % 84 = 82.
-  const targetAbsIdx = 82;
+  // Place Blue's marble at absolute index corresponding to Black's progress 81
+  // Black's start index is 8. Black's progress 81 is (8 + 81) % 84 = 5.
+  const targetAbsIdx = 5;
   const blueMarble = state.marbles.find((m) => m.player === 1);
   blueMarble.place = PLACE.TRACK;
   blueMarble.progress = (targetAbsIdx - state.starts[1] + TRACK_LEN) % TRACK_LEN;
@@ -257,7 +263,7 @@ test("backward-3 rule: bumps opponent at progress 74", () => {
   const res = applyMove(state, backwardMove, 3);
   assert.equal(res.bumpedIdx, state.marbles.indexOf(blueMarble));
   assert.equal(blueMarble.place, PLACE.HOME);
-  assert.equal(state.marbles[0].progress, 74);
+  assert.equal(state.marbles[0].progress, 81);
 });
 
 test("backward-3 rule: not allowed if the marble was not just moved out", () => {
@@ -276,4 +282,44 @@ test("backward-3 rule: not allowed if the marble was not just moved out", () => 
   const moves3 = rollAndCompute(state, 3);
   const backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
   assert.equal(backwardMove, undefined);
+});
+
+test("backward-3 rule: subsequent moves from progress 81 and 82", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+
+  // Set up a marble at progress 81
+  state.marbles[0].place = PLACE.TRACK;
+  state.marbles[0].progress = 81;
+
+  // Roll 1: should move to progress 82 on the track
+  const moves1 = legalMoves(state, 0, 1);
+  const move1 = moves1.find((m) => m.label.includes("moves 1"));
+  assert.ok(move1);
+  assert.equal(move1.targetPlace, PLACE.TRACK);
+  assert.equal(move1.targetProgress, 82);
+
+  // Roll 2: should enter finish 1 (slot 0)
+  const moves2 = legalMoves(state, 0, 2);
+  const move2 = moves2.find((m) => m.label.includes("enters finish 1"));
+  assert.ok(move2);
+  assert.equal(move2.targetPlace, PLACE.FINISH);
+  assert.equal(move2.targetFinish, 0);
+
+  // Roll 5: should enter finish 4 (slot 3)
+  const moves5 = legalMoves(state, 0, 5);
+  const move5 = moves5.find((m) => m.label.includes("enters finish 4"));
+  assert.ok(move5);
+  assert.equal(move5.targetPlace, PLACE.FINISH);
+  assert.equal(move5.targetFinish, 3);
+
+  // Test blocking at progress 82
+  state.marbles[1].place = PLACE.TRACK;
+  state.marbles[1].progress = 82;
+  const moves2Blocked = legalMoves(state, 0, 2);
+  const move2B = moves2Blocked.find((m) => m.label.includes("enters finish 1"));
+  assert.equal(move2B, undefined, "should be blocked by own marble at progress 82");
 });
