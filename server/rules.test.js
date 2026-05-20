@@ -113,6 +113,25 @@ test("smoke: roll a 6 then apply 'leaves home' move", () => {
   assert.equal(state.currentPlayer, 0);
 });
 
+test("home entry rule: only the leftmost home marble may leave on 1 or 6", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["A", "B"],
+  });
+
+  let leavesHome = legalMoves(state, 0, 6).filter((m) => m.label.includes("leaves home"));
+  assert.deepEqual(leavesHome.map((m) => state.marbles[m.marbleIdx].index), [0]);
+
+  state.marbles[0].place = PLACE.TRACK;
+  state.marbles[0].progress = 2;
+  state.marbles[1].place = PLACE.TRACK;
+  state.marbles[1].progress = 4;
+
+  leavesHome = legalMoves(state, 0, 1).filter((m) => m.label.includes("leaves home"));
+  assert.deepEqual(leavesHome.map((m) => state.marbles[m.marbleIdx].index), [2]);
+});
+
 test("smoke: roll 0 moves with non-reroll advances player", () => {
   const state = createInitialState({
     playerCount: 2,
@@ -389,4 +408,3 @@ test("finish entrance progress: normal forward traversal must reach progress 82"
   assert.equal(move1.targetPlace, PLACE.FINISH);
   assert.equal(move1.targetFinish, 0);
 });
-

@@ -162,6 +162,12 @@ export function ownFinishSlots(state, player) {
   );
 }
 
+export function leftmostHomeMarbleIndex(state, player) {
+  const homeMarbles = state.marbles.filter((m) => m.player === player && m.place === PLACE.HOME);
+  if (homeMarbles.length === 0) return null;
+  return Math.min(...homeMarbles.map((m) => m.index));
+}
+
 export function pathCrossesOwnMarble(state, player, fromProgress, toProgress) {
   const occupied = ownTrackProgresses(state, player);
   for (let progress = fromProgress + 1; progress <= toProgress; progress += 1) {
@@ -208,6 +214,7 @@ export function legalMoves(state, player, roll) {
 
     if (marble.place === PLACE.HOME) {
       if ([1, 6].includes(roll)) {
+        if (marble.index !== leftmostHomeMarbleIndex(state, pOwner)) return;
         const occupant = marbleAtTrack(state, startForPlayer(state, pOwner));
         if (!occupant || occupant.player !== pOwner) {
           moves.push({
