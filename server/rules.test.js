@@ -121,6 +121,43 @@ test("smoke: roll 0 moves with non-reroll advances player", () => {
   const moves = rollAndCompute(state, 3);
   assert.equal(moves.length, 0);
   assert.equal(state.currentPlayer, 1, "non-reroll with no moves advances");
+  // Regression: when the turn advances, the previous player's roll must be
+  // cleared so the new player doesn't see it on their dice.
+  assert.equal(state.pendingRoll, null);
+  assert.equal(state.pendingDieValue, null);
+});
+
+test("regression: stale pendingDieValue cleared after no-move turn pass", () => {
+  // Scenario the user reported: with two players, Black rolls and has no
+  // move; Blue's screen showed Black's die value as if Blue had already
+  // rolled. After fix, Blue's view sees a clean dice state.
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+  rollAndCompute(state, 3); // no-move + non-reroll → advances
+  assert.equal(state.currentPlayer, 1, "advanced to Blue");
+  assert.equal(state.pendingDieValue, null, "Blue should not see Black's die");
+  // Then a re-roll (1 or 6) with no moves should KEEP pendingDieValue so the
+  // player can see what they rolled while taking another roll.
+  const state2 = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+  // Force Black's start hole occupied so 6 yields no leave-home move and
+  // there's no other legal action. Easiest: mark every Black marble as
+  // already-finished so home is empty; then a 6 has no target.
+  state2.marbles.filter((m) => m.player === 0).forEach((m, i) => {
+    m.place = PLACE.FINISH;
+    m.finish = i;
+    m.progress = null;
+  });
+  // Now Black has nothing to do; rolling 6 should reroll and keep the die.
+  rollAndCompute(state2, 6);
+  assert.equal(state2.currentPlayer, 0, "reroll keeps the same player");
+  assert.equal(state2.pendingDieValue, 6, "reroll keeps the die visible");
 });
 
 test("smoke: legalMoves consistent with rollAndCompute", () => {

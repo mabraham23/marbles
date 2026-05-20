@@ -342,6 +342,10 @@ export function getWinner(state) {
 function nextPlayer(state) {
   state.currentPlayer = (state.currentPlayer + 1) % state.playerCount;
   if (state.currentPlayer === 0) state.turnNumber += 1;
+  // Turn advanced — drop any lingering die value so the new player doesn't
+  // see the previous player's roll displayed as their own.
+  state.pendingRoll = null;
+  state.pendingDieValue = null;
 }
 
 // Apply a move (mutates state). Returns metadata about what happened.
