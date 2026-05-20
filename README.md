@@ -67,20 +67,6 @@ server/
 - Color and team assignment is server-side and deterministic for each (player count, mode). Players don't pick colors, so team alternation constraints stay valid.
 - Modes by player count: 2 → 1v1; 3 → free-for-all; 4 → free-for-all or 2 teams of 2; 5 → free-for-all; 6 → free-for-all, 2 teams of 3, or 3 teams of 2.
 
-## Deploy to Render.com
-
-1. Commit and push the repo to GitHub.
-2. On Render, click **New → Web Service** and connect the repo.
-3. Settings:
-   - Environment: **Node**
-   - Build command: `npm install`
-   - Start command: `npm start`
-   - Node version: leave on autodetect (the `engines.node >= 20` in `package.json` is enough).
-4. Free tier is fine for family use, but note: the free instance **sleeps after 15 minutes of inactivity**. The first request after a sleep takes ~30 seconds to wake. Once awake, WebSockets work normally. If anyone tries to join during the wake-up window the lobby may look unresponsive — just give it a moment and reload.
-5. Once deployed you'll get a `*.onrender.com` URL — that's what you text to family. Append `?room=CODE` after creating a game.
-
-For an always-on alternative, Fly.io's free tier doesn't sleep but needs `fly.toml` and a Dockerfile (out of scope here).
-
 ## Out of scope / future work
 
 - Chat in the lobby.
