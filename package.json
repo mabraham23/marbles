@@ -12,6 +12,8 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@upstash/redis": "^1.38.0",
+    "dotenv": "^17.4.2",
     "ws": "^8.18.0"
   }
 }

@@ -5,6 +5,9 @@ import { extname, join, normalize as pathNormalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer } from "ws";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 import {
   MODES,
@@ -14,6 +17,8 @@ import {
   applyMove,
   rollAndCompute,
 } from "../public/shared/rules.js";
+
+import { roomStore } from "./storage.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const PUBLIC_DIR = resolve(__filename, "..", "..", "public");
@@ -32,56 +37,77 @@ const MIME = {
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 4;
 
-// ---------- Rooms ----------
+// ---------- In-Memory Connections ----------
+// WebSocket handles are transient and cannot be serialized to Redis.
+// We map roomCode -> { socketsByName: Map, preJoinSockets: Set }
+const roomConnections = new Map();
 
-/** @type {Map<string, Room>} */
-const rooms = new Map();
-
-function makeCode() {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    let code = "";
-    for (let i = 0; i < CODE_LENGTH; i += 1) {
-      code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
-    }
-    if (!rooms.has(code)) return code;
+function getConnections(code) {
+  let conn = roomConnections.get(code);
+  if (!conn) {
+    conn = { socketsByName: new Map(), preJoinSockets: new Set() };
+    roomConnections.set(code, conn);
   }
-  throw new Error("Could not allocate room code");
+  return conn;
 }
 
-function createRoom() {
-  const code = makeCode();
+function deleteConnections(code) {
+  roomConnections.delete(code);
+}
+
+// ---------- Rooms ----------
+
+function makeCode() {
+  let code = "";
+  for (let i = 0; i < CODE_LENGTH; i += 1) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+async function createRoom() {
+  let code = "";
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const testCode = makeCode();
+    const existing = await roomStore.get(testCode);
+    if (!existing) {
+      code = testCode;
+      break;
+    }
+  }
+  if (!code) throw new Error("Could not allocate room code");
+
   const room = {
     code,
     adminToken: randomUUID(),
     adminName: null,
     phase: "lobby",
     players: [], // [{ name }]
-    socketsByName: new Map(),
-    preJoinSockets: new Set(),
     mode: null,
     gameState: null,
     pendingMoves: null,
     pendingMovesFor: null,
     createdAt: Date.now(),
   };
-  rooms.set(code, room);
+
+  await roomStore.set(code, room);
+  getConnections(code); // Pre-warm connection pool
   return room;
 }
 
-function deleteRoomIfEmpty(room) {
-  if (room.socketsByName.size === 0 && room.preJoinSockets.size === 0 && room.players.length === 0) {
-    rooms.delete(room.code);
+async function deleteRoomIfEmpty(room) {
+  const conn = getConnections(room.code);
+  if (conn.socketsByName.size === 0 && conn.preJoinSockets.size === 0 && room.players.length === 0) {
+    await roomStore.delete(room.code);
+    deleteConnections(room.code);
   }
 }
 
-function findRoomBySocket(socket) {
-  for (const room of rooms.values()) {
-    if (room.preJoinSockets.has(socket)) return { room, name: null };
-    for (const [name, s] of room.socketsByName) {
-      if (s === socket) return { room, name };
-    }
-  }
-  return null;
+async function findRoomBySocket(socket) {
+  if (!socket.roomCode) return null;
+  const room = await roomStore.get(socket.roomCode);
+  if (!room) return null;
+  return { room, name: socket.playerName || null };
 }
 
 // ---------- Messaging ----------
@@ -123,32 +149,37 @@ function gameStatePayloadFor(room, recipientName) {
   return payload;
 }
 
-function broadcastLobby(room) {
+async function broadcastLobby(room) {
   const payload = lobbyStatePayload(room);
-  for (const socket of room.socketsByName.values()) safeSend(socket, payload);
-  for (const socket of room.preJoinSockets) safeSend(socket, payload);
+  const conn = getConnections(room.code);
+  for (const socket of conn.socketsByName.values()) safeSend(socket, payload);
+  for (const socket of conn.preJoinSockets) safeSend(socket, payload);
 }
 
-function broadcastGame(room) {
-  for (const [name, socket] of room.socketsByName) {
+async function broadcastGame(room) {
+  const conn = getConnections(room.code);
+  for (const [name, socket] of conn.socketsByName) {
     safeSend(socket, gameStatePayloadFor(room, name));
   }
 }
 
-function broadcastRoomState(room) {
-  if (room.phase === "lobby") broadcastLobby(room);
-  else broadcastGame(room);
-}
-
 // ---------- Handlers ----------
 
-function handleCreateRoom(socket) {
-  const room = createRoom();
-  room.preJoinSockets.add(socket);
-  safeSend(socket, { type: "roomCreated", code: room.code, adminToken: room.adminToken });
+async function handleCreateRoom(socket) {
+  try {
+    const room = await createRoom();
+    const conn = getConnections(room.code);
+    conn.preJoinSockets.add(socket);
+    socket.roomCode = room.code;
+    socket.playerName = null;
+    safeSend(socket, { type: "roomCreated", code: room.code, adminToken: room.adminToken });
+  } catch (err) {
+    console.error("Error creating room:", err);
+    sendError(socket, "Could not create room");
+  }
 }
 
-function handleJoinRoom(socket, msg) {
+async function handleJoinRoom(socket, msg) {
   const code = typeof msg.code === "string" ? msg.code.toUpperCase().trim() : "";
   const rawName = typeof msg.name === "string" ? msg.name.trim() : "";
   const adminToken = typeof msg.adminToken === "string" ? msg.adminToken : null;
@@ -157,24 +188,27 @@ function handleJoinRoom(socket, msg) {
   if (!rawName) return sendError(socket, "Name required");
   if (rawName.length > 20) return sendError(socket, "Name too long");
 
-  const room = rooms.get(code);
+  const room = await roomStore.get(code);
   if (!room) return sendError(socket, "Game not found");
 
   const name = rawName;
+  const conn = getConnections(code);
+
   // Detach the joining socket from any prior room slot to avoid duplicates.
-  const previous = findRoomBySocket(socket);
+  const previous = await findRoomBySocket(socket);
   if (previous) {
-    if (previous.room !== room) {
-      previous.room.preJoinSockets.delete(socket);
-      if (previous.name) previous.room.socketsByName.delete(previous.name);
-      deleteRoomIfEmpty(previous.room);
+    if (previous.room.code !== code) {
+      const prevConn = getConnections(previous.room.code);
+      prevConn.preJoinSockets.delete(socket);
+      if (previous.name) prevConn.socketsByName.delete(previous.name);
+      await deleteRoomIfEmpty(previous.room);
     }
   }
 
   if (room.phase === "lobby") {
     const existing = room.players.find((p) => p.name === name);
     if (existing) {
-      const liveSocket = room.socketsByName.get(name);
+      const liveSocket = conn.socketsByName.get(name);
       if (liveSocket && liveSocket !== socket && liveSocket.readyState === liveSocket.OPEN) {
         return sendError(socket, "Name taken");
       }
@@ -203,43 +237,56 @@ function handleJoinRoom(socket, msg) {
     isAdmin = true;
   }
 
-  // Attach socket
-  room.preJoinSockets.delete(socket);
+  // Attach socket properties
+  socket.roomCode = code;
+  socket.playerName = name;
+
+  conn.preJoinSockets.delete(socket);
   // If they had a stale socket, replace it.
-  const oldSocket = room.socketsByName.get(name);
+  const oldSocket = conn.socketsByName.get(name);
   if (oldSocket && oldSocket !== socket) {
     try { oldSocket.close(); } catch { /* ignore */ }
   }
-  room.socketsByName.set(name, socket);
+  conn.socketsByName.set(name, socket);
+
+  await roomStore.set(code, room);
 
   safeSend(socket, { type: "joinedRoom", code: room.code, name, isAdmin });
 
   if (room.phase === "lobby") {
-    broadcastLobby(room);
+    await broadcastLobby(room);
   } else {
-    broadcastGame(room);
+    await broadcastGame(room);
   }
 }
 
-function handleLeaveRoom(socket) {
-  const found = findRoomBySocket(socket);
+async function handleLeaveRoom(socket) {
+  const found = await findRoomBySocket(socket);
   if (!found) return;
-  const { room } = found;
-  room.preJoinSockets.delete(socket);
-  if (found.name) {
+  const { room, name } = found;
+  const conn = getConnections(room.code);
+
+  conn.preJoinSockets.delete(socket);
+  if (name) {
     if (room.phase === "lobby") {
-      room.players = room.players.filter((p) => p.name !== found.name);
-      if (room.adminName === found.name) room.adminName = null;
+      room.players = room.players.filter((p) => p.name !== name);
+      if (room.adminName === name) room.adminName = null;
     }
-    room.socketsByName.delete(found.name);
+    conn.socketsByName.delete(name);
   }
-  if (room.phase === "lobby") broadcastLobby(room);
-  else broadcastGame(room);
-  deleteRoomIfEmpty(room);
+
+  socket.roomCode = null;
+  socket.playerName = null;
+
+  await roomStore.set(room.code, room);
+
+  if (room.phase === "lobby") await broadcastLobby(room);
+  else await broadcastGame(room);
+  await deleteRoomIfEmpty(room);
 }
 
-function handleSetMode(socket, msg) {
-  const found = findRoomBySocket(socket);
+async function handleSetMode(socket, msg) {
+  const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
   const { room, name } = found;
   if (room.phase !== "lobby") return sendError(socket, "Game already started");
@@ -247,11 +294,13 @@ function handleSetMode(socket, msg) {
   const allowed = validModes(Math.max(2, room.players.length || 2));
   if (!allowed.includes(msg.mode)) return sendError(socket, "Mode not valid for player count");
   room.mode = msg.mode;
-  broadcastLobby(room);
+
+  await roomStore.set(room.code, room);
+  await broadcastLobby(room);
 }
 
-function handleStartGame(socket) {
-  const found = findRoomBySocket(socket);
+async function handleStartGame(socket) {
+  const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
   const { room, name } = found;
   if (room.phase !== "lobby") return sendError(socket, "Game already started");
@@ -273,7 +322,8 @@ function handleStartGame(socket) {
   room.pendingMoves = null;
   room.pendingMovesFor = null;
 
-  broadcastGame(room);
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
 }
 
 function makeFreshGameState(room) {
@@ -289,8 +339,8 @@ function makeFreshGameState(room) {
   return createInitialState({ playerCount, mode, playerNames });
 }
 
-function handleResetGame(socket) {
-  const found = findRoomBySocket(socket);
+async function handleResetGame(socket) {
+  const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
   const { room, name } = found;
   if (room.phase !== "playing" || !room.gameState) return sendError(socket, "Game not started");
@@ -300,11 +350,13 @@ function handleResetGame(socket) {
   room.phase = "playing";
   room.pendingMoves = null;
   room.pendingMovesFor = null;
-  broadcastGame(room);
+
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
 }
 
-function handleEndGame(socket) {
-  const found = findRoomBySocket(socket);
+async function handleEndGame(socket) {
+  const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
   const { room, name } = found;
   if (room.phase !== "playing") return sendError(socket, "Game not started");
@@ -316,11 +368,13 @@ function handleEndGame(socket) {
   room.gameState = null;
   room.pendingMoves = null;
   room.pendingMovesFor = null;
-  broadcastLobby(room);
+
+  await roomStore.set(room.code, room);
+  await broadcastLobby(room);
 }
 
-function handleRoll(socket) {
-  const found = findRoomBySocket(socket);
+async function handleRoll(socket) {
+  const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
   const { room, name } = found;
   if (room.phase !== "playing" || !room.gameState) return sendError(socket, "Game not started");
@@ -339,11 +393,13 @@ function handleRoll(socket) {
     room.pendingMoves = null;
     room.pendingMovesFor = null;
   }
-  broadcastGame(room);
+
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
 }
 
-function handleSubmitMove(socket, msg) {
-  const found = findRoomBySocket(socket);
+async function handleSubmitMove(socket, msg) {
+  const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
   const { room, name } = found;
   if (room.phase !== "playing" || !room.gameState) return sendError(socket, "Game not started");
@@ -369,12 +425,14 @@ function handleSubmitMove(socket, msg) {
   applyMove(room.gameState, move, room.gameState.pendingDieValue);
   room.pendingMoves = null;
   room.pendingMovesFor = null;
-  broadcastGame(room);
+
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
 }
 
 // ---------- Message router ----------
 
-function handleMessage(socket, raw) {
+async function handleMessage(socket, raw) {
   let msg;
   try {
     msg = JSON.parse(raw);
@@ -383,18 +441,23 @@ function handleMessage(socket, raw) {
   }
   if (!msg || typeof msg.type !== "string") return sendError(socket, "Bad message");
 
-  switch (msg.type) {
-    case "createRoom":  return handleCreateRoom(socket);
-    case "joinRoom":    return handleJoinRoom(socket, msg);
-    case "leaveRoom":   return handleLeaveRoom(socket);
-    case "setMode":     return handleSetMode(socket, msg);
-    case "startGame":   return handleStartGame(socket);
-    case "resetGame":   return handleResetGame(socket);
-    case "endGame":     return handleEndGame(socket);
-    case "roll":        return handleRoll(socket);
-    case "submitMove":  return handleSubmitMove(socket, msg);
-    default:
-      return sendError(socket, `Unknown message type: ${msg.type}`);
+  try {
+    switch (msg.type) {
+      case "createRoom":  return await handleCreateRoom(socket);
+      case "joinRoom":    return await handleJoinRoom(socket, msg);
+      case "leaveRoom":   return await handleLeaveRoom(socket);
+      case "setMode":     return await handleSetMode(socket, msg);
+      case "startGame":   return await handleStartGame(socket);
+      case "resetGame":   return await handleResetGame(socket);
+      case "endGame":     return await handleEndGame(socket);
+      case "roll":        return await handleRoll(socket);
+      case "submitMove":  return await handleSubmitMove(socket, msg);
+      default:
+        return sendError(socket, `Unknown message type: ${msg.type}`);
+    }
+  } catch (err) {
+    console.error(`Error processing action ${msg.type}:`, err);
+    sendError(socket, "Internal server error");
   }
 }
 
@@ -441,35 +504,32 @@ const PORT = Number(process.env.PORT) || 3000;
 const httpServer = http.createServer(serveStatic);
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
-// WebSocket-level heartbeat. Proxies between browser and Render kill idle
-// connections within ~60–120s; mobile Safari closes WS when the page goes
-// to the background. Pinging every 25s keeps the connection warm and lets
-// the server detect dead sockets within ~50s instead of waiting for TCP.
+// WebSocket-level heartbeat. Pinging every 25s keeps the connection warm.
 const HEARTBEAT_INTERVAL_MS = 25_000;
 
 wss.on("connection", (socket) => {
   socket.isAlive = true;
   socket.on("pong", () => { socket.isAlive = true; });
   socket.on("message", (data) => handleMessage(socket, data.toString()));
-  socket.on("close", () => {
-    const found = findRoomBySocket(socket);
+  socket.on("close", async () => {
+    const found = await findRoomBySocket(socket);
     if (!found) return;
     const { room } = found;
-    room.preJoinSockets.delete(socket);
+    const conn = getConnections(room.code);
+    conn.preJoinSockets.delete(socket);
     if (found.name) {
       // Only drop the socket reference if it matches; don't kick the player.
-      const current = room.socketsByName.get(found.name);
-      if (current === socket) room.socketsByName.delete(found.name);
+      const current = conn.socketsByName.get(found.name);
+      if (current === socket) conn.socketsByName.delete(found.name);
     }
-    deleteRoomIfEmpty(room);
+    await deleteRoomIfEmpty(room);
   });
   socket.on("error", (err) => {
     console.warn("socket error", err.message);
   });
 });
 
-// Sweep dead sockets. Each cycle: terminate any socket whose previous ping
-// went unanswered, then ping the rest.
+// Sweep dead sockets.
 const heartbeatTimer = setInterval(() => {
   wss.clients.forEach((socket) => {
     if (socket.isAlive === false) {
@@ -484,13 +544,20 @@ heartbeatTimer.unref();
 wss.on("close", () => clearInterval(heartbeatTimer));
 
 // Periodic GC: drop empty rooms older than 1h.
-setInterval(() => {
-  const now = Date.now();
-  for (const room of rooms.values()) {
-    const live = room.socketsByName.size + room.preJoinSockets.size;
-    if (live === 0 && now - room.createdAt > 60 * 60 * 1000) {
-      rooms.delete(room.code);
+setInterval(async () => {
+  try {
+    const now = Date.now();
+    const rooms = await roomStore.list();
+    for (const room of rooms) {
+      const conn = getConnections(room.code);
+      const live = conn.socketsByName.size + conn.preJoinSockets.size;
+      if (live === 0 && now - room.createdAt > 60 * 60 * 1000) {
+        await roomStore.delete(room.code);
+        deleteConnections(room.code);
+      }
     }
+  } catch (err) {
+    console.error("Error in GC interval:", err);
   }
 }, 5 * 60 * 1000).unref();
 
