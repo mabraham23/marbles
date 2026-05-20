@@ -1120,21 +1120,35 @@ input::placeholder {
   width: 100%;
 }
 
-@keyframes no-moves-flash-anim {
-  0%, 100% {
+@keyframes turn-notice-pulse-anim {
+  0% {
     opacity: 1;
-    transform: scale(1);
+    transform: translate(-50%, -50%) scale(1);
   }
-  50% {
-    opacity: 0.6;
-    transform: scale(1.03);
-    color: #ff9e9e;
+  45% {
+    opacity: 0.88;
+    transform: translate(-50%, -50%) scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
   }
 }
 
-.no-moves-flash {
-  animation: no-moves-flash-anim 0.8s ease-in-out infinite;
-  display: inline-block;
+.turn-notice-pulse {
+  animation: turn-notice-pulse-anim 0.45s ease-out 1;
+}
+
+.turn-notice {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  width: max-content;
+  max-width: calc(100% - 104px);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 /* --- LOBBY CHAT SYSTEM --- */

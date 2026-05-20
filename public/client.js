@@ -30,6 +30,11 @@ const createBtn = document.querySelector("#createBtn");
 const joinForm = document.querySelector("#joinForm");
 const joinCodeInput = document.querySelector("#joinCodeInput");
 const ROOM_CODE_LENGTH = 4;
+const ERROR_BANNER_MS = 2500;
+const CONNECTED_PILL_MS = 900;
+const OFFLINE_PILL_MS = 1200;
+const COPY_CONFIRM_MS = 1000;
+const NO_MOVE_NOTICE_MS = 1000;
 
 const nameForm = document.querySelector("#nameForm");
 const nameInput = document.querySelector("#nameInput");
@@ -50,6 +55,7 @@ const finishLayer = document.querySelector("#finishLayer");
 const homeLayer = document.querySelector("#homeLayer");
 const tokenLayer = document.querySelector("#tokenLayer");
 const moveHintLayer = document.querySelector("#moveHintLayer");
+const turnPanel = document.querySelector(".turn-panel");
 const turnLabel = document.querySelector("#turnLabel");
 const rollButton = document.querySelector("#rollButton");
 const dieValueEl = document.querySelector("#dieValue");
@@ -74,7 +80,6 @@ const ui = {
   pendingMoves: null, // moves for current roll (current player only)
   socket: null,
   connected: false,
-  isNoMoveDelayActive: false,
   lastProcessedNoMoveRollId: null,
   isChatOpen: false,
   unreadCount: 0,
@@ -83,6 +88,7 @@ const ui = {
 
 let diceSpinTimer = null;
 let diceSpinValue = 1;
+let turnNoticeEl = null;
 
 function $on(el, ev, fn) {
   if (el) el.addEventListener(ev, fn);
@@ -123,7 +129,7 @@ function showView(name) {
 function showError(msg) {
   errorBanner.textContent = msg;
   errorBanner.hidden = false;
-  setTimeout(() => { errorBanner.hidden = true; }, 4000);
+  setTimeout(() => { errorBanner.hidden = true; }, ERROR_BANNER_MS);
 }
 
 // --- Session persistence (per-tab) ---
@@ -154,6 +160,7 @@ const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 15000];
 let socket = null;
 let reconnectAttempt = 0;
 let pillFlashTimer = null;
+let noMoveNoticeTimer = null;
 let manuallyClosed = false;
 
 function setConnState(state) {
@@ -164,7 +171,7 @@ function setConnState(state) {
     connPill.textContent = "Connected";
     // Briefly show the green pill on first connect, then fade out.
     if (pillFlashTimer) clearTimeout(pillFlashTimer);
-    pillFlashTimer = setTimeout(() => { connPill.hidden = true; }, 1200);
+    pillFlashTimer = setTimeout(() => { connPill.hidden = true; }, CONNECTED_PILL_MS);
   } else if (state === "reconnecting") {
     connPill.textContent = "Reconnecting…";
   } else if (state === "connecting") {
@@ -182,7 +189,7 @@ function flashPillBriefly(text) {
   connPill.textContent = text;
   pillFlashTimer = setTimeout(() => {
     setConnState(ui.connected ? "connected" : "reconnecting");
-  }, 1500);
+  }, OFFLINE_PILL_MS);
 }
 
 function connect() {
@@ -263,11 +270,10 @@ function handleServerMessage(msg) {
       ui.pendingMoves = msg.movesFor === ui.myName ? msg.moves || null : null;
       if (ui.view !== "game") showView("game");
 
+      renderGame();
       if (state.noMoveRoll && state.noMoveRoll.rollId !== ui.lastProcessedNoMoveRollId) {
         ui.lastProcessedNoMoveRollId = state.noMoveRoll.rollId;
-        triggerNoMoveSequence(state.noMoveRoll);
-      } else if (!ui.isNoMoveDelayActive) {
-        renderGame();
+        flashNoMoveNotice(state.noMoveRoll);
       }
       break;
     case "chatHistory":
@@ -329,7 +335,7 @@ $on(copyLinkBtn, "click", async () => {
   try {
     await navigator.clipboard.writeText(url);
     copyLinkBtn.textContent = "Copied!";
-    setTimeout(() => { copyLinkBtn.textContent = "Copy invite link"; }, 1500);
+    setTimeout(() => { copyLinkBtn.textContent = "Copy invite link"; }, COPY_CONFIRM_MS);
   } catch {
     showError("Copy failed; link: " + url);
   }
@@ -571,7 +577,6 @@ function renderMoveHints(isMyTurn) {
 }
 
 function renderGame() {
-  if (ui.isNoMoveDelayActive) return;
   const state = ui.game;
   if (!state) return;
   const cp = state.currentPlayer;
@@ -722,39 +727,35 @@ function stopDiceRollAnimation(finalValue) {
   setDiceFace(finalValue);
 }
 
-function triggerNoMoveSequence(noMoveRoll) {
-  ui.isNoMoveDelayActive = true;
+function ensureTurnNotice() {
+  if (turnNoticeEl) return turnNoticeEl;
+  turnNoticeEl = document.createElement("div");
+  turnNoticeEl.className = "current-player turn-notice";
+  turnNoticeEl.hidden = true;
+  turnPanel.append(turnNoticeEl);
+  return turnNoticeEl;
+}
 
-  // Stop any dice roll animations immediately and show the rolled face
-  stopDiceRollAnimation(noMoveRoll.dieValue);
+function flashNoMoveNotice(noMoveRoll) {
+  if (noMoveNoticeTimer) clearTimeout(noMoveNoticeTimer);
 
-  // Disable the roll button
-  rollButton.disabled = true;
-
-  // Clear moves panel
-  movesPanel.replaceChildren();
-  moveHintLayer.replaceChildren();
-
-  // Update the turn text and status text to show "No Moves!"
   const rollingPlayerName = ui.game.playerNames[noMoveRoll.player];
   const seat = ui.game.seatColors[noMoveRoll.player];
+  const notice = ensureTurnNotice();
+  notice.style.setProperty("--player-color", PLAYER_COLORS[seat]);
+  notice.style.setProperty("--player-stroke", PLAYER_STROKES[seat]);
+  notice.style.setProperty("--player-ink", tokenLabelColor(seat));
+  notice.textContent = `${rollingPlayerName}: No moves`;
+  notice.hidden = false;
+  notice.classList.remove("turn-notice-pulse");
+  void notice.offsetWidth;
+  notice.classList.add("turn-notice-pulse");
 
-  // Set dice colors to rolling player's colors
-  rollButton.style.setProperty("--dice-color", PLAYER_COLORS[seat]);
-  rollButton.style.setProperty("--dice-stroke", PLAYER_STROKES[seat]);
-  rollButton.style.setProperty("--dice-ink", tokenLabelColor(seat));
-
-  // Show "rolled X" on the dice label
-  dieValueEl.textContent = `Rolled ${noMoveRoll.dieValue}`;
-
-  // Change the turn text to indicate they rolled but have no move, styled beautifully
-  turnLabel.innerHTML = `<span class="current-player no-moves-flash" style="--player-color:${PLAYER_COLORS[seat]};--player-stroke:${PLAYER_STROKES[seat]};--player-ink:${tokenLabelColor(seat)}">${escapeHTML(rollingPlayerName)}: No Valid Moves!</span>`;
-
-  // After 2.5 seconds, reset the active delay and run the normal renderGame
-  setTimeout(() => {
-    ui.isNoMoveDelayActive = false;
-    renderGame();
-  }, 2500);
+  noMoveNoticeTimer = setTimeout(() => {
+    noMoveNoticeTimer = null;
+    notice.hidden = true;
+    notice.classList.remove("turn-notice-pulse");
+  }, NO_MOVE_NOTICE_MS);
 }
 
 // --- Roll button ---
