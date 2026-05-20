@@ -211,6 +211,28 @@ export function legalMoves(state, player, roll) {
     }
 
     if (marble.place === PLACE.TRACK) {
+      // SPECIAL RULE: Backward-3 move from start space (progress 0)
+      if (marble.progress === 0 && roll === 3 && state.lastMove) {
+        if (
+          state.lastMove.marbleIdx === marbleIdx &&
+          state.lastMove.before.place === PLACE.HOME &&
+          state.lastMove.after.place === PLACE.TRACK &&
+          state.lastMove.after.progress === 0 &&
+          state.lastMove.before.player === player
+        ) {
+          const ownProgresses = ownTrackProgresses(state, player);
+          const pathBlocked = ownProgresses.has(75) || ownProgresses.has(74);
+          if (!pathBlocked) {
+            moves.push({
+              marbleIdx,
+              label: `${marbleToken(marble)} moves backward to gateway`,
+              targetPlace: PLACE.TRACK,
+              targetProgress: MAX_TRACK_PROGRESS - 1, // 74
+            });
+          }
+        }
+      }
+
       if (marble.progress < CENTER_PROGRESS && marble.progress + roll === CENTER_PROGRESS) {
         if (!pathCrossesOwnMarble(state, player, marble.progress, CENTER_PROGRESS - 1)) {
           const occupant = centerOccupant(state);

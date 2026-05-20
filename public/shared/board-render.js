@@ -360,13 +360,19 @@ export function buildMovePath(state, lastMove, viewerSeat) {
     return points;
   }
   if (lastMove.before.place === PLACE.TRACK && lastMove.targetPlace === PLACE.TRACK) {
-    const fromIdx = CORNER_PROGRESSES.indexOf(lastMove.before.progress);
-    const toIdx = CORNER_PROGRESSES.indexOf(lastMove.targetProgress);
-    const isCornerJump = fromIdx >= 0 && toIdx >= 0 && toIdx > fromIdx && lastMove.targetProgress - lastMove.before.progress > 1;
-    if (isCornerJump) {
-      for (let i = fromIdx + 1; i <= toIdx; i += 1) points.push(trackHole(CORNER_PROGRESSES[i]));
+    const isBackwardToGateway = lastMove.before.progress === 0 && lastMove.targetProgress === MAX_TRACK_PROGRESS - 1;
+    if (isBackwardToGateway) {
+      points.push(trackHole(MAX_TRACK_PROGRESS));
+      points.push(trackHole(MAX_TRACK_PROGRESS - 1));
     } else {
-      for (let p = lastMove.before.progress + 1; p <= lastMove.targetProgress; p += 1) points.push(trackHole(p));
+      const fromIdx = CORNER_PROGRESSES.indexOf(lastMove.before.progress);
+      const toIdx = CORNER_PROGRESSES.indexOf(lastMove.targetProgress);
+      const isCornerJump = fromIdx >= 0 && toIdx >= 0 && toIdx > fromIdx && lastMove.targetProgress - lastMove.before.progress > 1;
+      if (isCornerJump) {
+        for (let i = fromIdx + 1; i <= toIdx; i += 1) points.push(trackHole(CORNER_PROGRESSES[i]));
+      } else {
+        for (let p = lastMove.before.progress + 1; p <= lastMove.targetProgress; p += 1) points.push(trackHole(p));
+      }
     }
     return points;
   }

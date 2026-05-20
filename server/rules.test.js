@@ -11,6 +11,7 @@ import {
   legalMoves,
   PLACE,
   MARBLES_PER_PLAYER,
+  TRACK_LEN,
 } from "../public/shared/rules.js";
 
 test("validModes by player count", () => {
@@ -169,4 +170,110 @@ test("smoke: legalMoves consistent with rollAndCompute", () => {
   const computed = rollAndCompute(state, 6);
   const direct = legalMoves(state, state.currentPlayer, 6);
   assert.equal(computed.length, direct.length);
+});
+
+test("backward-3 rule: eligibility and execution on rolling 3 immediately after leaving home", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+
+  // 1. Black rolls a 6 and leaves home
+  const moves6 = rollAndCompute(state, 6);
+  const leaveHomeMove = moves6.find((m) => m.label.includes("leaves home"));
+  assert.ok(leaveHomeMove, "expected leave home move");
+  applyMove(state, leaveHomeMove, 6);
+
+  // Black marble index 0 is now at progress 0, and player is still Black (reroll)
+  assert.equal(state.currentPlayer, 0);
+  assert.equal(state.marbles[0].place, PLACE.TRACK);
+  assert.equal(state.marbles[0].progress, 0);
+
+  // 2. Black rolls a 3. Should have both forward 3 and backward-to-gateway moves.
+  const moves3 = rollAndCompute(state, 3);
+  const backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
+  assert.ok(backwardMove, "expected backward-to-gateway move option");
+  assert.equal(backwardMove.targetProgress, 74);
+
+  // 3. Apply the backward move
+  const res = applyMove(state, backwardMove, 3);
+  assert.equal(state.marbles[0].progress, 74);
+  assert.equal(res.wasReroll, false, "3 is not a reroll");
+  assert.equal(state.currentPlayer, 1, "turn should advance to Blue");
+});
+
+test("backward-3 rule: blocked when own marble is at progress 75 or 74", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+
+  // Black rolls a 6 and leaves home
+  const moves6 = rollAndCompute(state, 6);
+  applyMove(state, moves6[0], 6);
+
+  // Position another Black marble at progress 75
+  state.marbles[1].place = PLACE.TRACK;
+  state.marbles[1].progress = 75;
+
+  // Black rolls a 3. Backward move should be blocked by marble at progress 75.
+  const moves3 = rollAndCompute(state, 3);
+  let backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
+  assert.equal(backwardMove, undefined, "should not allow backward move when progress 75 is occupied");
+
+  // Move that blocking marble to progress 74 instead
+  state.marbles[1].progress = 74;
+  const moves3_2 = legalMoves(state, 0, 3);
+  backwardMove = moves3_2.find((m) => m.label.includes("backward to gateway"));
+  assert.equal(backwardMove, undefined, "should not allow backward move when target 74 is occupied by own marble");
+});
+
+test("backward-3 rule: bumps opponent at progress 74", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+
+  // Black rolls a 6 and leaves home
+  const moves6 = rollAndCompute(state, 6);
+  applyMove(state, moves6[0], 6);
+
+  // Place Blue's marble at absolute index corresponding to Black's progress 74
+  // Black's start index is 8. Black's progress 74 is (8 + 74) % 84 = 82.
+  const targetAbsIdx = 82;
+  const blueMarble = state.marbles.find((m) => m.player === 1);
+  blueMarble.place = PLACE.TRACK;
+  blueMarble.progress = (targetAbsIdx - state.starts[1] + TRACK_LEN) % TRACK_LEN;
+
+  // Black rolls a 3. Backward move should be available.
+  const moves3 = rollAndCompute(state, 3);
+  const backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
+  assert.ok(backwardMove);
+
+  // Apply backward move. Opponent should be bumped home.
+  const res = applyMove(state, backwardMove, 3);
+  assert.equal(res.bumpedIdx, state.marbles.indexOf(blueMarble));
+  assert.equal(blueMarble.place, PLACE.HOME);
+  assert.equal(state.marbles[0].progress, 74);
+});
+
+test("backward-3 rule: not allowed if the marble was not just moved out", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+
+  // Place a marble at progress 0 manually, but with NO lastMove state
+  state.marbles[0].place = PLACE.TRACK;
+  state.marbles[0].progress = 0;
+  state.lastMove = null;
+
+  // Roll 3. Backward move should not be available.
+  const moves3 = rollAndCompute(state, 3);
+  const backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
+  assert.equal(backwardMove, undefined);
 });
