@@ -39,24 +39,26 @@ server/
 ## Game rules
 
 - Roll a 1 or 6 to leave home; both grant a re-roll.
+- **Backward-3 Move Rule:** If you roll a `3` immediately after a marble leaves home, that marble can go backward `3` spaces (landing at progress `81` on the track, just before your finish lane).
 - Own marbles block landing or jumping past them on the track and in the finish lane.
 - Opponent marbles can be bumped home (sent back to their starting pad).
 - The finish lane needs an exact roll — no overshoot.
 - A marble can enter the center on an exact roll that lands on it from the player's first stretch; only a roll of 1 exits the center, and only onto a corner hole.
 - Corner-circuit shortcut: if you're sitting on a corner apex, a roll N jumps you N corners forward (capped at your own home-side corner).
+- **Team Play / Teammate Move Sharing:** When playing on teams, once you get all of your own marbles home, you can roll the dice on your turn and move teammate marbles on their behalf to help your team win.
+- **Win Conditions:** In single play, a player wins when all of their own marbles are home. In team play, a team wins when all marbles for that entire team make it to their respective finish lanes.
 - The local player's home row always renders at the bottom of the board (rotation is per-viewer, not per-turn).
 
-## Multiplayer details
+## Multiplayer & State Persistence
 
-- Rooms live in memory only — a server restart wipes them. Acceptable for casual family use.
+- **Redis Integration:** Room and board state are stored in Upstash Redis with a 24-hour expiration TTL. This means active games and lobbies survive server restarts and sleep cycles.
+- **In-Game Lobby Chat:** Includes a premium, real-time glassmorphic chat drawer with glowing unread badge notifications, autoscroll, and dynamic name colorization matching each player's board color.
 - Identity = name within a room. Reconnecting with the same name (and, for the admin, the same `adminToken` saved in `localStorage`) reclaims the seat.
 - Color and team assignment is server-side and deterministic for each (player count, mode). Players don't pick colors, so team alternation constraints stay valid.
 - Modes by player count: 2 → 1v1; 3 → free-for-all; 4 → free-for-all or 2 teams of 2; 5 → free-for-all; 6 → free-for-all, 2 teams of 3, or 3 teams of 2.
 
 ## Out of scope / future work
 
-- Chat in the lobby.
 - Spectator mode.
 - Auto-promote next-joined player to admin if the original admin abandons the lobby.
-- Persistence across server restarts.
 - Letting one player control multiple colors.
