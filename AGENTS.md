@@ -26,9 +26,18 @@ Use this when a Codex agent needs to run Marbles locally and drive it in the Cod
 
 - For 2 players: join the second visible tab/origin as `Player 2`, then start from the admin tab.
 - For 6 players: create the admin room visibly, then add `Player 2` through `Player 6` using WebSocket `joinRoom` calls to `ws://localhost:3000/ws`.
+- The server acknowledges helper joins with `{ "type": "joinedRoom" }`, not `roomJoined`.
+- In the lobby, helper clients should wait for `joinedRoom` or `lobbyState`; they will not receive `gameState` until after the game starts.
+- Keep helper sockets open until the visible admin lobby shows all six players and the game has started. Closing helper sockets while still in the lobby can leave later setup checks racing against socket cleanup.
 - Joined players remain in the room's `players` list even after their WebSocket helpers close, unless they explicitly leave or the room is deleted.
 - For 6 players, select a valid mode before starting; `Free-for-all` corresponds to mode `single`.
+- If `Start game` stays disabled with six players visible, select a mode first.
 - Prefer using the visible admin tab to start the game if it is still connected. A second admin WebSocket reclaim can fail with `Name taken` while the browser admin socket is live.
+- After helper joins or game start, verify room state with:
+
+```bash
+node --input-type=module -e "import { roomStore } from './server/storage.js'; const room = await roomStore.get('CODE'); console.log(JSON.stringify({ phase: room.phase, mode: room.mode, players: room.players.map(p => p.name), currentPlayer: room.gameState?.playerNames?.[room.gameState?.currentPlayer] }, null, 2));"
+```
 
 ### Gameplay Simulation
 

@@ -1,17 +1,22 @@
 // Client: rendering, animation, WebSocket plumbing.
 import {
-  MODULE_LEN,
   TRACK_LEN,
   PLAYER_COLORS,
   PLAYER_STROKES,
   modeLabel,
   PLACE,
+  centerOccupant,
+  marbleAtTrack,
+  marbleToken,
 } from "./shared/rules.js";
 
 import {
   renderBoardLayers,
   buildMovePath as renderBuildMovePath,
   animateAlongPath as renderAnimateAlongPath,
+  pointForMarble,
+  pointForMarbleState,
+  svgEl,
   tokenLabelColor,
 } from "./shared/board-render.js?v=2";
 
@@ -44,6 +49,7 @@ const trackLayer = document.querySelector("#trackLayer");
 const finishLayer = document.querySelector("#finishLayer");
 const homeLayer = document.querySelector("#homeLayer");
 const tokenLayer = document.querySelector("#tokenLayer");
+const moveHintLayer = document.querySelector("#moveHintLayer");
 const turnLabel = document.querySelector("#turnLabel");
 const rollButton = document.querySelector("#rollButton");
 const dieValueEl = document.querySelector("#dieValue");
@@ -404,6 +410,149 @@ function localSeat() {
   return ui.game.seatColors[lp];
 }
 
+function moveTargetPoint(state, move, viewerSeat) {
+  const marble = state.marbles[move.marbleIdx];
+  return pointForMarbleState(
+    state,
+    marble.player,
+    move.targetPlace,
+    move.targetProgress ?? null,
+    move.targetFinish ?? null,
+    marble.index,
+    viewerSeat,
+  );
+}
+
+function moveTargetOccupant(state, move) {
+  const marble = state.marbles[move.marbleIdx];
+  if (move.targetPlace === PLACE.TRACK) {
+    const targetAbs = (state.starts[marble.player] + move.targetProgress) % TRACK_LEN;
+    const occupant = marbleAtTrack(state, targetAbs);
+    return occupant && occupant.player !== marble.player ? occupant : null;
+  }
+  if (move.targetPlace === PLACE.CENTER) {
+    const occupant = centerOccupant(state);
+    return occupant && occupant.player !== marble.player ? occupant : null;
+  }
+  return null;
+}
+
+function moveAccessibleLabel(state, move) {
+  const occupant = moveTargetOccupant(state, move);
+  return occupant ? `${move.label}, bumps ${marbleToken(occupant)} home` : move.label;
+}
+
+function disablePendingMoveControls() {
+  Array.from(movesPanel.querySelectorAll("button")).forEach((button) => {
+    button.disabled = true;
+  });
+  Array.from(moveHintLayer.querySelectorAll("[role='button']")).forEach((button) => {
+    button.classList.add("move-hint-disabled");
+    button.setAttribute("aria-disabled", "true");
+  });
+}
+
+function submitPendingMove(moveIdx) {
+  disablePendingMoveControls();
+  send({ type: "submitMove", moveIdx });
+}
+
+function addMoveHintActivation(group, moveIdx) {
+  group.addEventListener("click", () => {
+    if (group.getAttribute("aria-disabled") === "true") return;
+    submitPendingMove(moveIdx);
+  });
+  group.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    if (group.getAttribute("aria-disabled") === "true") return;
+    submitPendingMove(moveIdx);
+  });
+}
+
+function groupedMoveTargets(state, moves, viewerSeat) {
+  const groups = new Map();
+  moves.forEach((move, moveIdx) => {
+    const point = moveTargetPoint(state, move, viewerSeat);
+    const key = `${Math.round(point.x)}:${Math.round(point.y)}`;
+    if (!groups.has(key)) groups.set(key, { point, entries: [] });
+    groups.get(key).entries.push({ move, moveIdx });
+  });
+  return [...groups.values()];
+}
+
+function chipOffset(index, count) {
+  if (count === 1) return { x: 0, y: 0 };
+  const spread = 31;
+  const start = -((count - 1) * spread) / 2;
+  return { x: start + index * spread, y: -23 };
+}
+
+function makeMoveChoiceChip(state, entry, x, y, isCapture, hitRadius) {
+  const marble = state.marbles[entry.move.marbleIdx];
+  const labelText = moveAccessibleLabel(state, entry.move);
+  const group = svgEl("g", {
+    class: `move-choice${isCapture ? " capture" : ""}`,
+    role: "button",
+    tabindex: "0",
+    "aria-label": labelText,
+    style: `--hint-color:${PLAYER_COLORS[marble.seat]};--hint-stroke:${PLAYER_STROKES[marble.seat]};--hint-ink:${tokenLabelColor(marble.seat)}`,
+  });
+  const title = svgEl("title");
+  title.textContent = labelText;
+  group.append(title);
+  group.append(svgEl("circle", { class: "move-hit", cx: x, cy: y, r: hitRadius }));
+  group.append(svgEl("circle", { class: "move-chip", cx: x, cy: y, r: 12.5 }));
+  const text = svgEl("text", { class: "move-chip-label", x, y: y + 0.4 });
+  text.textContent = marbleToken(marble);
+  group.append(text);
+  addMoveHintActivation(group, entry.moveIdx);
+  return group;
+}
+
+function renderMoveHints(isMyTurn) {
+  moveHintLayer.replaceChildren();
+  const state = ui.game;
+  if (!state || !isMyTurn || !ui.pendingMoves?.length) return;
+
+  const viewerSeat = localSeat();
+  const sourceIds = new Set(ui.pendingMoves.map((move) => move.marbleIdx));
+  sourceIds.forEach((marbleIdx) => {
+    const marble = state.marbles[marbleIdx];
+    const point = pointForMarble(state, marble, viewerSeat);
+    moveHintLayer.append(svgEl("circle", {
+      class: "move-source-halo",
+      cx: point.x,
+      cy: point.y,
+      r: 17,
+      style: `--hint-color:${PLAYER_COLORS[marble.seat]};--hint-stroke:${PLAYER_STROKES[marble.seat]}`,
+    }));
+  });
+
+  groupedMoveTargets(state, ui.pendingMoves, viewerSeat).forEach((target) => {
+    const hasCapture = target.entries.some((entry) => moveTargetOccupant(state, entry.move));
+    moveHintLayer.append(svgEl("circle", {
+      class: `move-target-ring${hasCapture ? " capture" : ""}${target.entries.length > 1 ? " multi" : ""}`,
+      cx: target.point.x,
+      cy: target.point.y,
+      r: 18,
+    }));
+
+    target.entries.forEach((entry, index) => {
+      const offset = chipOffset(index, target.entries.length);
+      const hitRadius = target.entries.length === 1 ? 21 : 14;
+      moveHintLayer.append(makeMoveChoiceChip(
+        state,
+        entry,
+        target.point.x + offset.x,
+        target.point.y + offset.y,
+        Boolean(moveTargetOccupant(state, entry.move)),
+        hitRadius,
+      ));
+    });
+  });
+}
+
 function renderGame() {
   if (ui.isNoMoveDelayActive) return;
   const state = ui.game;
@@ -458,11 +607,7 @@ function renderGame() {
       b.className = "move-button";
       b.type = "button";
       b.textContent = m.label;
-      b.addEventListener("click", () => {
-        // Disable while waiting for server confirmation
-        Array.from(movesPanel.querySelectorAll("button")).forEach((x) => (x.disabled = true));
-        send({ type: "submitMove", moveIdx: idx });
-      });
+      b.addEventListener("click", () => submitPendingMove(idx));
       movesPanel.append(b);
     });
   } else if (isMyTurn && state.pendingDieValue != null && !canRoll) {
@@ -514,6 +659,7 @@ function renderBoard() {
     ui.game,
     localSeat(),
   );
+  renderMoveHints(ui.game.currentPlayer === localPlayerIdx());
 }
 
 let lastAnimatedMoveSig = null;
@@ -570,6 +716,7 @@ function triggerNoMoveSequence(noMoveRoll) {
 
   // Clear moves panel
   movesPanel.replaceChildren();
+  moveHintLayer.replaceChildren();
 
   // Update the turn text and status text to show "No Moves!"
   const rollingPlayerName = ui.game.playerNames[noMoveRoll.player];

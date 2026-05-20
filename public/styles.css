@@ -329,6 +329,76 @@ input::placeholder {
   dominant-baseline: central;
 }
 
+#moveHintLayer {
+  pointer-events: none;
+}
+
+.move-source-halo {
+  fill: rgba(255, 255, 255, 0.1);
+  stroke: var(--hint-color, var(--accent));
+  stroke-dasharray: 5 4;
+  stroke-width: 3;
+  opacity: 0.86;
+  pointer-events: none;
+}
+
+.move-target-ring {
+  fill: rgba(255, 245, 222, 0.24);
+  stroke: #fff8dd;
+  stroke-width: 4;
+  opacity: 0.96;
+  pointer-events: none;
+}
+
+.move-target-ring.multi {
+  stroke-dasharray: 6 4;
+}
+
+.move-target-ring.capture {
+  fill: rgba(184, 50, 58, 0.24);
+  stroke: #ffdf7a;
+}
+
+.move-choice {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.move-choice.capture .move-chip {
+  stroke: #ffdf7a;
+}
+
+.move-choice:focus-visible .move-chip {
+  stroke: #fffbe8;
+  stroke-width: 3;
+}
+
+.move-hit {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.move-chip {
+  fill: var(--hint-color, var(--accent));
+  stroke: var(--hint-stroke, rgba(0, 0, 0, 0.4));
+  stroke-width: 2.2;
+}
+
+.move-chip-label {
+  fill: var(--hint-ink, #fff);
+  font-family: var(--font-family);
+  font-size: 10px;
+  font-weight: 900;
+  pointer-events: none;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.move-hint-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .control-panel {
   display: grid;
   gap: 9px;
