@@ -251,9 +251,9 @@ input::placeholder {
 
 #board {
   display: block;
-  width: min(100%, 58svh, 560px);
+  width: min(100%, 62svh, 580px);
   max-height: 100%;
-  aspect-ratio: 420 / 455;
+  aspect-ratio: 520 / 560;
   touch-action: manipulation;
 }
 
@@ -267,22 +267,22 @@ input::placeholder {
   fill: none;
   stroke: rgba(142, 93, 37, 0.22);
   stroke-linecap: round;
-  stroke-width: 1.6;
+  stroke-width: 2;
 }
 
 .wood-line.soft {
   stroke: rgba(255, 236, 194, 0.28);
-  stroke-width: 2.2;
+  stroke-width: 2.8;
 }
 
 .hole {
   fill: rgba(118, 79, 35, 0.19);
   stroke: rgba(255, 248, 228, 0.68);
-  stroke-width: 1.2;
+  stroke-width: 1.55;
 }
 
 .start-hole {
-  stroke-width: 1.65;
+  stroke-width: 2.1;
 }
 
 .finish-hole {
@@ -293,16 +293,16 @@ input::placeholder {
 .center-hole {
   fill: rgba(118, 79, 35, 0.19);
   stroke: rgba(255, 248, 228, 0.68);
-  stroke-width: 1.2;
+  stroke-width: 1.55;
 }
 
 .corner-label {
   fill: #111827;
   stroke: rgba(255, 250, 235, 0.96);
-  stroke-width: 3.2px;
+  stroke-width: 4px;
   paint-order: stroke fill;
   font-family: var(--font-family);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 900;
   pointer-events: none;
   text-anchor: middle;
@@ -312,17 +312,17 @@ input::placeholder {
 .home-pad {
   fill: rgba(255, 250, 235, 0.66);
   stroke: rgba(39, 53, 78, 0.52);
-  stroke-width: 1.55;
+  stroke-width: 2;
 }
 
 .token {
   stroke: rgba(0, 0, 0, 0.34);
-  stroke-width: 1.35;
+  stroke-width: 1.7;
 }
 
 .token-label {
   font-family: var(--font-family);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 800;
   pointer-events: none;
   text-anchor: middle;
@@ -942,7 +942,7 @@ input::placeholder {
   }
 
   #board {
-    width: min(100%, 720px);
+    width: min(100%, 760px);
   }
 
   .control-panel {

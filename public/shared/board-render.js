@@ -20,10 +20,10 @@ import {
 } from "./rules.js";
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
-export const BOARD_CENTER = { x: 210, y: 222 };
-export const BOARD_RADIUS = 190;
-export const TRACK_RADIUS = 128;
-export const CORNER_INSET = 130;
+export const BOARD_CENTER = { x: 260, y: 280 };
+export const BOARD_RADIUS = 245;
+export const TRACK_RADIUS = 165;
+export const CORNER_INSET = 165;
 
 export const boardPoints = makeHexPoints(BOARD_RADIUS, 0);
 export const baseTrackPoints = makeTrackPoints();
@@ -84,7 +84,7 @@ function makeArmPoints(sideRow, endpointIndex, direction, target) {
 
 function makeSideRows() {
   const normalAngles = [90, 150, 210, 270, 330, 30];
-  const rowSpacing = 14;
+  const rowSpacing = 19;
   return normalAngles.map((degrees) => {
     const angle = (degrees * Math.PI) / 180;
     const normal = { x: Math.cos(angle), y: Math.sin(angle) };
@@ -147,9 +147,9 @@ export function homePoint(state, player, index, viewerSeat) {
   if (readsRightToLeft || readsBottomToTop) {
     sideDirection = { x: -sideDirection.x, y: -sideDirection.y };
   }
-  const rowOutset = 20;
+  const rowOutset = 26;
   const rowCenter = { x: sideCenter.x + away.x * rowOutset, y: sideCenter.y + away.y * rowOutset };
-  const spacing = 22;
+  const spacing = 28;
   const offset = (index - (MARBLES_PER_PLAYER - 1) / 2) * spacing;
   return { x: rowCenter.x + sideDirection.x * offset, y: rowCenter.y + sideDirection.y * offset };
 }
@@ -159,10 +159,10 @@ export function tokenLabelColor(seat) {
 }
 
 export function tokenRadius(place) {
-  if (place === PLACE.HOME) return 9;
-  if (place === PLACE.FINISH) return 6.5;
-  if (place === PLACE.CENTER) return 9;
-  return 6.5;
+  if (place === PLACE.HOME) return 11;
+  if (place === PLACE.FINISH) return 9;
+  if (place === PLACE.CENTER) return 11;
+  return 9;
 }
 
 export function pointForMarbleState(state, player, place, progress, finish, index, viewerSeat) {
@@ -183,20 +183,37 @@ export function pointForMarble(state, marble, viewerSeat) {
 
 function renderWoodGrain(woodLayer) {
   woodLayer.replaceChildren();
-  for (let y = 70; y <= 382; y += 12) {
-    const wave = 3 + ((y / 12) % 4);
+  const left = BOARD_CENTER.x - BOARD_RADIUS + 5;
+  const right = BOARD_CENTER.x + BOARD_RADIUS - 5;
+  const top = BOARD_CENTER.y - BOARD_RADIUS * 0.88;
+  const bottom = BOARD_CENTER.y + BOARD_RADIUS * 0.88;
+  const span = right - left;
+  const c1x = left + span * 0.18;
+  const c2x = left + span * 0.27;
+  const midX = left + span * 0.5;
+  const c3x = left + span * 0.7;
+  const step = 16;
+  let waveSeed = 0;
+  for (let y = top; y <= bottom; y += step) {
+    const wave = 3 + (waveSeed % 4);
     const d = [
-      `M 28 ${y.toFixed(1)}`,
-      `C 92 ${(y - wave).toFixed(1)} 126 ${(y + wave).toFixed(1)} 190 ${y.toFixed(1)}`,
-      `S 298 ${(y - wave).toFixed(1)} 392 ${y.toFixed(1)}`,
+      `M ${left.toFixed(1)} ${y.toFixed(1)}`,
+      `C ${c1x.toFixed(1)} ${(y - wave).toFixed(1)} ${c2x.toFixed(1)} ${(y + wave).toFixed(1)} ${midX.toFixed(1)} ${y.toFixed(1)}`,
+      `S ${c3x.toFixed(1)} ${(y - wave).toFixed(1)} ${right.toFixed(1)} ${y.toFixed(1)}`,
     ].join(" ");
     woodLayer.append(svgEl("path", { class: "wood-line", d }));
-    if (y % 36 === 10) {
+    if (waveSeed % 3 === 0) {
+      const softLeft = left + 18;
+      const softRight = right - 12;
+      const sc1x = softLeft + (softRight - softLeft) * 0.22;
+      const sc2x = softLeft + (softRight - softLeft) * 0.5;
+      const sc3x = softLeft + (softRight - softLeft) * 0.78;
       woodLayer.append(svgEl("path", {
         class: "wood-line soft",
-        d: `M 42 ${y + 5} C 118 ${y + 1} 190 ${y + 10} 276 ${y + 4} S 350 ${y + 2} 382 ${y + 6}`,
+        d: `M ${softLeft.toFixed(1)} ${(y + 6).toFixed(1)} C ${sc1x.toFixed(1)} ${(y + 1).toFixed(1)} ${sc2x.toFixed(1)} ${(y + 12).toFixed(1)} ${sc3x.toFixed(1)} ${(y + 4).toFixed(1)} S ${(softRight - 22).toFixed(1)} ${(y + 2).toFixed(1)} ${softRight.toFixed(1)} ${(y + 7).toFixed(1)}`,
       }));
     }
+    waveSeed += 1;
   }
 }
 
@@ -211,8 +228,8 @@ function renderCornerLabels(trackLayer, state, viewerSeat) {
     const point = trackPoint((viewerStart + cornerProgress) % TRACK_LEN, viewerSeat);
     const away = normalize({ x: point.x - BOARD_CENTER.x, y: point.y - BOARD_CENTER.y });
     const labelPoint = {
-      x: point.x + away.x * 25,
-      y: point.y + away.y * 25,
+      x: point.x + away.x * 32,
+      y: point.y + away.y * 32,
     };
     const text = svgEl("text", {
       class: "corner-label",
@@ -251,7 +268,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
       class: seat !== undefined ? "hole start-hole" : "hole",
       cx: point.x,
       cy: point.y,
-      r: 5.1,
+      r: 7.5,
     });
     if (seat !== undefined) circle.setAttribute("stroke", PLAYER_COLORS[seat]);
     trackLayer.append(circle);
@@ -264,7 +281,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
     class: "hole center-hole",
     cx: BOARD_CENTER.x,
     cy: BOARD_CENTER.y,
-    r: 5.1,
+    r: 7.5,
   }));
 
   // Finish lanes + home pads per active player.
@@ -276,7 +293,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
         class: "finish-hole",
         cx: point.x,
         cy: point.y,
-        r: 6,
+        r: 7.5,
         stroke: PLAYER_COLORS[seat],
       }));
     }
@@ -286,7 +303,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
         class: "home-pad",
         cx: point.x,
         cy: point.y,
-        r: 7.5,
+        r: 9.5,
       }));
     }
   }
