@@ -132,7 +132,6 @@ function handleServerMessage(msg) {
       ui.roomCode = msg.code;
       ui.myName = msg.name;
       ui.isAdmin = msg.isAdmin;
-      try { localStorage.setItem(`name:${msg.code}`, msg.name); } catch {}
       break;
     case "lobbyState":
       ui.lobby = msg;
@@ -424,9 +423,6 @@ function init() {
   if (room) {
     ui.roomCode = room.toUpperCase();
     showView("name");
-    let savedName = null;
-    try { savedName = localStorage.getItem(`name:${ui.roomCode}`); } catch {}
-    if (savedName) nameInput.value = savedName;
   } else {
     showView("home");
   }
