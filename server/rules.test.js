@@ -12,6 +12,7 @@ import {
   PLACE,
   MARBLES_PER_PLAYER,
   TRACK_LEN,
+  playerDone,
 } from "../public/shared/rules.js";
 
 test("validModes by player count", () => {
@@ -322,4 +323,39 @@ test("backward-3 rule: subsequent moves from progress 81 and 82", () => {
   const moves2Blocked = legalMoves(state, 0, 2);
   const move2B = moves2Blocked.find((m) => m.label.includes("enters finish 1"));
   assert.equal(move2B, undefined, "should be blocked by own marble at progress 82");
+});
+
+test("team play teammate move sharing rule: finished player can move unfinished teammate marbles", () => {
+  const state = createInitialState({
+    playerCount: 4,
+    mode: MODES.PAIRS, // Team 0 is [0, 2], Team 1 is [1, 3]
+    playerNames: ["Yellow", "Blue", "Black", "White"],
+  });
+
+  // 1. Manually move all of Yellow's (player 0) marbles into finish slots so they are done.
+  const yellowMarbles = state.marbles.filter((m) => m.player === 0);
+  yellowMarbles.forEach((m, idx) => {
+    m.place = PLACE.FINISH;
+    m.finish = idx;
+  });
+
+  // Verify that Yellow is done
+  assert.ok(playerDone(state, 0));
+
+  // 2. Yellow (player 0) rolls a 6.
+  // Their teammate is Black (player 2), who has marbles in HOME.
+  const moves6 = legalMoves(state, 0, 6);
+
+  // Moves list should contain Black's marbles leaving home
+  const blackLeavesHome = moves6.find((m) => m.label.includes("leaves home") && state.marbles[m.marbleIdx].player === 2);
+  assert.ok(blackLeavesHome, "Yellow should be able to move Black's marble out of home");
+
+  // 3. Apply the move
+  applyMove(state, blackLeavesHome, 6);
+
+  // Black's marble should now be on the track
+  const blackMarble = state.marbles[blackLeavesHome.marbleIdx];
+  assert.equal(blackMarble.place, PLACE.TRACK);
+  assert.equal(blackMarble.progress, 0);
+  assert.equal(blackMarble.player, 2);
 });

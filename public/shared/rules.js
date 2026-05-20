@@ -192,13 +192,24 @@ export function cornerJumpPathClear(state, player, fromProgress, toProgress) {
 
 export function legalMoves(state, player, roll) {
   const moves = [];
+
+  let allowedPlayers = new Set([player]);
+  if (state.teams && playerDone(state, player)) {
+    const team = state.teams.find((t) => t.includes(player));
+    if (team) {
+      allowedPlayers = new Set(team.filter((p) => !playerDone(state, p)));
+    }
+  }
+
   state.marbles.forEach((marble, marbleIdx) => {
-    if (marble.player !== player) return;
+    if (!allowedPlayers.has(marble.player)) return;
+
+    const pOwner = marble.player;
 
     if (marble.place === PLACE.HOME) {
       if ([1, 6].includes(roll)) {
-        const occupant = marbleAtTrack(state, startForPlayer(state, player));
-        if (!occupant || occupant.player !== player) {
+        const occupant = marbleAtTrack(state, startForPlayer(state, pOwner));
+        if (!occupant || occupant.player !== pOwner) {
           moves.push({
             marbleIdx,
             label: `${marbleToken(marble)} leaves home`,
@@ -218,9 +229,9 @@ export function legalMoves(state, player, roll) {
           state.lastMove.before.place === PLACE.HOME &&
           state.lastMove.after.place === PLACE.TRACK &&
           state.lastMove.after.progress === 0 &&
-          state.lastMove.before.player === player
+          state.lastMove.before.player === pOwner
         ) {
-          const ownProgresses = ownTrackProgresses(state, player);
+          const ownProgresses = ownTrackProgresses(state, pOwner);
           const pathBlocked = ownProgresses.has(83) || ownProgresses.has(82) || ownProgresses.has(81);
           if (!pathBlocked) {
             moves.push({
@@ -237,9 +248,9 @@ export function legalMoves(state, player, roll) {
       if (marble.progress === 81 || marble.progress === 82) {
         const nextProgress = marble.progress + roll;
         if (nextProgress === 82) {
-          const abs = (startForPlayer(state, player) + 82) % TRACK_LEN;
+          const abs = (startForPlayer(state, pOwner) + 82) % TRACK_LEN;
           const occupant = marbleAtTrack(state, abs);
-          if (!occupant || occupant.player !== player) {
+          if (!occupant || occupant.player !== pOwner) {
             moves.push({
               marbleIdx,
               label: `${marbleToken(marble)} moves 1`,
@@ -250,8 +261,8 @@ export function legalMoves(state, player, roll) {
         } else {
           const finishSlot = nextProgress - 83;
           if (finishSlot >= 0 && finishSlot < FINISH_LEN) {
-            const finishes = ownFinishSlots(state, player);
-            const occupiedTrack = ownTrackProgresses(state, player);
+            const finishes = ownFinishSlots(state, pOwner);
+            const occupiedTrack = ownTrackProgresses(state, pOwner);
             const trackBlocked = nextProgress > 81 && occupiedTrack.has(82);
             let finishBlocked = false;
             for (let slot = 0; slot <= finishSlot; slot += 1) {
@@ -271,9 +282,9 @@ export function legalMoves(state, player, roll) {
       }
 
       if (marble.progress < CENTER_PROGRESS && marble.progress + roll === CENTER_PROGRESS) {
-        if (!pathCrossesOwnMarble(state, player, marble.progress, CENTER_PROGRESS - 1)) {
+        if (!pathCrossesOwnMarble(state, pOwner, marble.progress, CENTER_PROGRESS - 1)) {
           const occupant = centerOccupant(state);
-          if (!occupant || occupant.player !== player) {
+          if (!occupant || occupant.player !== pOwner) {
             moves.push({
               marbleIdx,
               label: `${marbleToken(marble)} takes center`,
@@ -285,9 +296,9 @@ export function legalMoves(state, player, roll) {
 
       const nextProgress = marble.progress + roll;
       if (nextProgress <= MAX_TRACK_PROGRESS) {
-        if (!pathCrossesOwnMarble(state, player, marble.progress, nextProgress)) {
-          const occupant = marbleAtTrack(state, (startForPlayer(state, player) + nextProgress) % TRACK_LEN);
-          if (!occupant || occupant.player !== player) {
+        if (!pathCrossesOwnMarble(state, pOwner, marble.progress, nextProgress)) {
+          const occupant = marbleAtTrack(state, (startForPlayer(state, pOwner) + nextProgress) % TRACK_LEN);
+          if (!occupant || occupant.player !== pOwner) {
             moves.push({
               marbleIdx,
               label: `${marbleToken(marble)} moves ${roll}`,
@@ -299,8 +310,8 @@ export function legalMoves(state, player, roll) {
       } else {
         const finishSlot = nextProgress - MAX_TRACK_PROGRESS - 1;
         if (finishSlot >= 0 && finishSlot < FINISH_LEN) {
-          const finishes = ownFinishSlots(state, player);
-          const trackClear = !pathCrossesOwnMarble(state, player, marble.progress, MAX_TRACK_PROGRESS);
+          const finishes = ownFinishSlots(state, pOwner);
+          const trackClear = !pathCrossesOwnMarble(state, pOwner, marble.progress, MAX_TRACK_PROGRESS);
           let finishClear = true;
           for (let slot = 0; slot <= finishSlot; slot += 1) {
             if (finishes.has(slot)) finishClear = false;
@@ -317,10 +328,10 @@ export function legalMoves(state, player, roll) {
       }
 
       const jump = cornerJumpTarget(marble.progress, roll);
-      if (jump && cornerJumpPathClear(state, player, marble.progress, jump.targetProgress)) {
-        const targetAbs = (startForPlayer(state, player) + jump.targetProgress) % TRACK_LEN;
+      if (jump && cornerJumpPathClear(state, pOwner, marble.progress, jump.targetProgress)) {
+        const targetAbs = (startForPlayer(state, pOwner) + jump.targetProgress) % TRACK_LEN;
         const occupant = marbleAtTrack(state, targetAbs);
-        if (!occupant || occupant.player !== player) {
+        if (!occupant || occupant.player !== pOwner) {
           moves.push({
             marbleIdx,
             label: `${marbleToken(marble)} jumps to corner ${jump.targetIdx + 1}`,
@@ -335,7 +346,7 @@ export function legalMoves(state, player, roll) {
     if (marble.place === PLACE.FINISH) {
       const nextSlot = marble.finish + roll;
       if (nextSlot < FINISH_LEN) {
-        const finishes = ownFinishSlots(state, player);
+        const finishes = ownFinishSlots(state, pOwner);
         let finishClear = true;
         for (let slot = marble.finish + 1; slot <= nextSlot; slot += 1) {
           if (finishes.has(slot)) finishClear = false;
@@ -354,9 +365,9 @@ export function legalMoves(state, player, roll) {
 
     if (marble.place === PLACE.CENTER && roll === 1) {
       CORNER_PROGRESSES.forEach((cornerProgress, idx) => {
-        const targetAbs = (startForPlayer(state, player) + cornerProgress) % TRACK_LEN;
+        const targetAbs = (startForPlayer(state, pOwner) + cornerProgress) % TRACK_LEN;
         const occupant = marbleAtTrack(state, targetAbs);
-        if (!occupant || occupant.player !== player) {
+        if (!occupant || occupant.player !== pOwner) {
           moves.push({
             marbleIdx,
             label: `${marbleToken(marble)} exits center to corner ${idx + 1}`,
@@ -376,7 +387,7 @@ function sendHome(marble) {
   marble.finish = null;
 }
 
-function playerDone(state, player) {
+export function playerDone(state, player) {
   const slots = new Set(
     state.marbles
       .filter((m) => m.player === player && m.place === PLACE.FINISH)
