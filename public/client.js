@@ -47,6 +47,7 @@ const CONNECTED_PILL_MS = 900;
 const OFFLINE_PILL_MS = 1200;
 const COPY_CONFIRM_MS = 1000;
 const NO_MOVE_NOTICE_MS = 1700;
+const LOBBY_SYNC_MS = 5000;
 
 const nameForm = document.querySelector("#nameForm");
 const nameInput = document.querySelector("#nameInput");
@@ -111,6 +112,7 @@ const ui = {
 let diceSpinTimer = null;
 let diceSpinValue = 1;
 let turnNoticeEl = null;
+let lobbySyncTimer = null;
 
 function $on(el, ev, fn) {
   if (el) el.addEventListener(ev, fn);
@@ -149,6 +151,7 @@ function showView(name) {
     ui.unreadCount = 0;
     updateChatBadge();
   }
+  updateLobbySyncTimer();
 }
 
 function showError(msg) {
@@ -240,6 +243,7 @@ function connect() {
       if (ui.pendingHandle) payload.venmoHandle = ui.pendingHandle;
       sock.send(JSON.stringify(payload));
     }
+    updateLobbySyncTimer();
   });
   sock.addEventListener("close", () => {
     ui.connected = false;
@@ -268,6 +272,21 @@ function send(payload) {
   return false;
 }
 
+function requestRoomSync() {
+  if (!ui.roomCode || !ui.myName) return;
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ type: "syncRoom" }));
+}
+
+function updateLobbySyncTimer() {
+  if (lobbySyncTimer) {
+    clearInterval(lobbySyncTimer);
+    lobbySyncTimer = null;
+  }
+  if (ui.view !== "lobby" || !ui.roomCode || !ui.myName) return;
+  lobbySyncTimer = setInterval(requestRoomSync, LOBBY_SYNC_MS);
+}
+
 function handleServerMessage(msg) {
   switch (msg.type) {
     case "roomCreated":
@@ -287,6 +306,7 @@ function handleServerMessage(msg) {
       ui.isAdmin = msg.isAdmin;
       // Cache identity per-tab so a reload / brief disconnect rejoins silently.
       saveSession(msg.code, { name: msg.name, isAdmin: msg.isAdmin });
+      requestRoomSync();
       break;
     case "lobbyState":
       ui.lobby = msg;
@@ -295,6 +315,7 @@ function handleServerMessage(msg) {
       ui.settlement = null;
       if (ui.view !== "lobby") showView("lobby");
       renderLobby();
+      updateLobbySyncTimer();
       break;
     case "gameState":
       const state = msg.state;
@@ -568,6 +589,20 @@ function buildRulesDemo(kind) {
     targetPoint = pointForMarbleState(state, 0, PLACE.TRACK, 13, null, 0, viewerSeat);
     viewPoints = path;
     label = "Black marble moves forward along connected track holes";
+  } else if (kind === "blocked") {
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, 7);
+    setDemoMarble(state, 0, 1, PLACE.TRACK, 10);
+    movingIdx = demoMarbleIndex(0, 0);
+    path = [
+      pointForMarbleState(state, 0, PLACE.TRACK, 7, null, 0, viewerSeat),
+      pointForMarbleState(state, 0, PLACE.TRACK, 8, null, 0, viewerSeat),
+      pointForMarbleState(state, 0, PLACE.TRACK, 9, null, 0, viewerSeat),
+      pointForMarbleState(state, 0, PLACE.TRACK, 10, null, 0, viewerSeat),
+    ];
+    targetPoint = pointForMarbleState(state, 0, PLACE.TRACK, 10, null, 0, viewerSeat);
+    targetClass = " blocked";
+    viewPoints = path;
+    label = "Black marble 1 cannot pass through Black marble 2";
   } else if (kind === "corner") {
     const fromProgress = CORNER_PROGRESSES[0];
     const toProgress = CORNER_PROGRESSES[3];
@@ -783,7 +818,9 @@ function renderRulesDemo(container, kind) {
       style: `transform-origin:${demo.targetPoint.x}px ${demo.targetPoint.y}px`,
     }));
   }
-  appendAnimatedDemoToken(overlayLayerEl, movingMarble, movingPathData);
+  if (demo.targetClass !== " blocked") {
+    appendAnimatedDemoToken(overlayLayerEl, movingMarble, movingPathData);
+  }
   if (demo.bumpedPath && demo.bumpedIdx !== null) {
     appendAnimatedDemoToken(overlayLayerEl, demo.state.marbles[demo.bumpedIdx], demoPathData(demo.bumpedPath), {
       dur: "2.4s",
@@ -1412,6 +1449,14 @@ $on(resetGameBtn, "click", () => {
 $on(endGameBtn, "click", () => {
   if (!ui.isAdmin) return;
   send({ type: "endGame" });
+});
+
+window.addEventListener("focus", () => {
+  if (ui.view === "lobby") requestRoomSync();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && ui.view === "lobby") requestRoomSync();
 });
 
 // --- Init ---

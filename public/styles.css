@@ -1313,6 +1313,12 @@ input::placeholder {
   stroke: #ffdf7a;
 }
 
+.rules-demo-target.blocked {
+  fill: rgba(184, 50, 58, 0.2);
+  stroke: #ffdf7a;
+  stroke-dasharray: 6 5;
+}
+
 .rules-demo-token .token {
   filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.42));
 }

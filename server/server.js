@@ -154,7 +154,7 @@ async function createRoom(opts = {}) {
 }
 
 async function deleteRoomIfEmpty(room) {
-  const conn = getConnections(room.code);
+  const conn = pruneRoomConnections(room.code);
   if (conn.socketsByName.size === 0 && conn.preJoinSockets.size === 0 && room.players.length === 0) {
     await deleteRoomEverywhere(room.code);
   }
@@ -176,6 +176,21 @@ function safeSend(socket, payload) {
   } catch {
     /* ignore */
   }
+}
+
+function pruneRoomConnections(code) {
+  const conn = getConnections(code);
+  for (const socket of [...conn.preJoinSockets]) {
+    if (!socket || socket.readyState === socket.CLOSED || socket.readyState === socket.CLOSING) {
+      conn.preJoinSockets.delete(socket);
+    }
+  }
+  for (const [name, socket] of [...conn.socketsByName]) {
+    if (!socket || socket.readyState === socket.CLOSED || socket.readyState === socket.CLOSING) {
+      conn.socketsByName.delete(name);
+    }
+  }
+  return conn;
 }
 
 function sendError(socket, message) {
@@ -214,13 +229,13 @@ function gameStatePayloadFor(room, recipientName) {
 
 async function broadcastLobby(room) {
   const payload = lobbyStatePayload(room);
-  const conn = getConnections(room.code);
+  const conn = pruneRoomConnections(room.code);
   for (const socket of conn.socketsByName.values()) safeSend(socket, payload);
   for (const socket of conn.preJoinSockets) safeSend(socket, payload);
 }
 
 async function broadcastGame(room) {
-  const conn = getConnections(room.code);
+  const conn = pruneRoomConnections(room.code);
   for (const [name, socket] of conn.socketsByName) {
     safeSend(socket, gameStatePayloadFor(room, name));
   }
@@ -348,6 +363,19 @@ async function handleJoinRoom(socket, msg) {
       await broadcastGame(room);
     }
   });
+}
+
+async function handleSyncRoom(socket) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase === "lobby") {
+    safeSend(socket, lobbyStatePayload(room));
+    return;
+  }
+  if (room.phase === "playing" && room.gameState) {
+    safeSend(socket, gameStatePayloadFor(room, name));
+  }
 }
 
 async function handleLeaveRoom(socket) {
@@ -634,6 +662,7 @@ async function handleMessage(socket, raw) {
     switch (msg.type) {
       case "createRoom":     return await handleCreateRoom(socket, msg);
       case "joinRoom":       return await handleJoinRoom(socket, msg);
+      case "syncRoom":       return await handleSyncRoom(socket);
       case "leaveRoom":      return await handleLeaveRoom(socket);
       case "setMode":        return await handleSetMode(socket, msg);
       case "startGame":      return await handleStartGame(socket);
@@ -742,7 +771,7 @@ setInterval(async () => {
     const now = Date.now();
     const rooms = await roomStore.list();
     for (const room of rooms) {
-      const conn = getConnections(room.code);
+      const conn = pruneRoomConnections(room.code);
       const live = conn.socketsByName.size + conn.preJoinSockets.size;
       if (
         roomShouldExpire(room, now) ||
