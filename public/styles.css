@@ -1531,24 +1531,6 @@ input::placeholder {
   letter-spacing: 0;
 }
 
-.handle-paste-btn {
-  align-self: stretch;
-  padding: 0 14px;
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--wood-soft);
-  background: rgba(224, 184, 112, 0.18);
-  border: 0;
-  border-left: 1px solid var(--line);
-  cursor: pointer;
-}
-
-.handle-paste-btn:hover {
-  background: rgba(224, 184, 112, 0.28);
-}
-
 .handle-help-link {
   display: inline-block;
   margin-top: 6px;
