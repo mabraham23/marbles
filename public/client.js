@@ -606,7 +606,6 @@ function renderGame() {
   if (state.pendingDieValue == null && diceSpinTimer) {
     stopDiceRollAnimation(null);
   }
-  rollButton.disabled = !canRoll || Boolean(diceSpinTimer);
   if (state.pendingDieValue != null) {
     stopDiceRollAnimation(state.pendingDieValue);
     if (isMyTurn && ui.pendingMoves?.length) {
@@ -620,6 +619,7 @@ function renderGame() {
     setDiceFace(null);
     dieValueEl.textContent = canRoll ? "Tap the dice to roll" : "Waiting for roll";
   }
+  rollButton.disabled = !canRoll || Boolean(diceSpinTimer);
 
   // Moves panel
   movesPanel.replaceChildren();
