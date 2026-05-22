@@ -697,6 +697,8 @@ input::placeholder {
 }
 
 .card {
+  min-width: 0;
+  width: 100%;
   background: linear-gradient(150deg, rgba(24, 28, 35, 0.94), rgba(12, 15, 21, 0.94));
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -926,10 +928,17 @@ input::placeholder {
   color: #15100a;
 }
 
-.slot-name { flex: 1; }
+.slot-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .slot-empty { flex: 1; font-style: italic; }
 
 .tag {
+  flex: 0 0 auto;
   font-size: 0.7rem;
   padding: 2px 8px;
   border-radius: 999px;
@@ -1531,6 +1540,15 @@ input::placeholder {
   letter-spacing: 0;
 }
 
+.fee-help {
+  color: rgba(255, 245, 222, 0.62);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .handle-help-link {
   display: inline-block;
   margin-top: 6px;
@@ -1563,10 +1581,15 @@ input::placeholder {
 }
 
 .tag-handle {
+  display: inline-block;
+  max-width: min(46vw, 150px);
+  overflow: hidden;
   background: rgba(47, 138, 136, 0.85);
   color: #fff;
   font-weight: 700;
+  text-overflow: ellipsis;
   text-transform: none;
+  white-space: nowrap;
   letter-spacing: 0;
 }
 

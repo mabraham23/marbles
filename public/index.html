@@ -66,11 +66,12 @@
         </h1>
         <div id="homeChoices" class="home-choices">
           <label class="fee-field">
-            <span>Entry fee per player (optional)</span>
+            <span>Entry fee per player in dollars (optional)</span>
             <span class="fee-input-wrap">
               <span class="fee-prefix">$</span>
-              <input id="entryFeeInput" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" />
+              <input id="entryFeeInput" type="number" inputmode="decimal" min="0" step="0.01" placeholder="5" aria-describedby="entryFeeHelp" />
             </span>
+            <span id="entryFeeHelp" class="fee-help">Type 5 for a $5 buy-in.</span>
           </label>
           <button id="createBtn" class="primary-button" type="button">Create new game</button>
           <div class="or">or</div>
