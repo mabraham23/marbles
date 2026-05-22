@@ -236,7 +236,8 @@ export function legalMoves(state, player, roll) {
           state.lastMove.before.place === PLACE.HOME &&
           state.lastMove.after.place === PLACE.TRACK &&
           state.lastMove.after.progress === 0 &&
-          state.lastMove.before.player === pOwner
+          state.lastMove.before.player === pOwner &&
+          state.lastMove.roll === 1
         ) {
           const ownProgresses = ownTrackProgresses(state, pOwner);
           const pathBlocked = ownProgresses.has(83) || ownProgresses.has(82) || ownProgresses.has(81);
@@ -515,6 +516,7 @@ export function applyMove(state, move, roll) {
 
   state.lastMove = {
     marbleIdx: move.marbleIdx,
+    roll,
     before: beforeMarble,
     after: {
       place: movingMarble.place,

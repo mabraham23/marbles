@@ -192,18 +192,18 @@ test("smoke: legalMoves consistent with rollAndCompute", () => {
   assert.equal(computed.length, direct.length);
 });
 
-test("backward-3 rule: eligibility and execution on rolling 3 immediately after leaving home", () => {
+test("backward-3 rule: eligibility and execution on rolling 3 immediately after leaving home with a 1", () => {
   const state = createInitialState({
     playerCount: 2,
     mode: MODES.SINGLE,
     playerNames: ["Black", "Blue"],
   });
 
-  // 1. Black rolls a 6 and leaves home
-  const moves6 = rollAndCompute(state, 6);
-  const leaveHomeMove = moves6.find((m) => m.label.includes("leaves home"));
+  // 1. Black rolls a 1 and leaves home
+  const moves1 = rollAndCompute(state, 1);
+  const leaveHomeMove = moves1.find((m) => m.label.includes("leaves home"));
   assert.ok(leaveHomeMove, "expected leave home move");
-  applyMove(state, leaveHomeMove, 6);
+  applyMove(state, leaveHomeMove, 1);
 
   // Black marble index 0 is now at progress 0, and player is still Black (reroll)
   assert.equal(state.currentPlayer, 0);
@@ -223,6 +223,23 @@ test("backward-3 rule: eligibility and execution on rolling 3 immediately after 
   assert.equal(state.currentPlayer, 1, "turn should advance to Blue");
 });
 
+test("backward-3 rule: not allowed after leaving home with a 6", () => {
+  const state = createInitialState({
+    playerCount: 2,
+    mode: MODES.SINGLE,
+    playerNames: ["Black", "Blue"],
+  });
+
+  const moves6 = rollAndCompute(state, 6);
+  const leaveHomeMove = moves6.find((m) => m.label.includes("leaves home"));
+  assert.ok(leaveHomeMove, "expected leave home move");
+  applyMove(state, leaveHomeMove, 6);
+
+  const moves3 = rollAndCompute(state, 3);
+  const backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
+  assert.equal(backwardMove, undefined, "6 out followed by 3 should not allow backward move");
+});
+
 test("backward-3 rule: blocked when own marble is at progress 83, 82, or 81", () => {
   const state = createInitialState({
     playerCount: 2,
@@ -230,9 +247,9 @@ test("backward-3 rule: blocked when own marble is at progress 83, 82, or 81", ()
     playerNames: ["Black", "Blue"],
   });
 
-  // Black rolls a 6 and leaves home
-  const moves6 = rollAndCompute(state, 6);
-  applyMove(state, moves6[0], 6);
+  // Black rolls a 1 and leaves home
+  const moves1 = rollAndCompute(state, 1);
+  applyMove(state, moves1[0], 1);
 
   // Position another Black marble at progress 83
   state.marbles[1].place = PLACE.TRACK;
@@ -263,9 +280,9 @@ test("backward-3 rule: bumps opponent at progress 81", () => {
     playerNames: ["Black", "Blue"],
   });
 
-  // Black rolls a 6 and leaves home
-  const moves6 = rollAndCompute(state, 6);
-  applyMove(state, moves6[0], 6);
+  // Black rolls a 1 and leaves home
+  const moves1 = rollAndCompute(state, 1);
+  applyMove(state, moves1[0], 1);
 
   // Place Blue's marble at absolute index corresponding to Black's progress 81
   // Black's start index is 8. Black's progress 81 is (8 + 81) % 84 = 5.
