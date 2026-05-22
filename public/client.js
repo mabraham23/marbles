@@ -33,6 +33,7 @@ const joinCodeInput = document.querySelector("#joinCodeInput");
 const handleField = document.querySelector("#handleField");
 const handleFieldLabel = document.querySelector("#handleFieldLabel");
 const venmoInput = document.querySelector("#venmoInput");
+const pasteHandleBtn = document.querySelector("#pasteHandleBtn");
 const lobbyFeeBanner = document.querySelector("#lobbyFeeBanner");
 const settlementPanel = document.querySelector("#settlementPanel");
 const LAST_VENMO_KEY = "lastVenmoHandle";
@@ -374,6 +375,27 @@ function applyHandleFieldVisibility() {
       : "Venmo handle";
   }
 }
+
+$on(pasteHandleBtn, "click", async () => {
+  if (!navigator.clipboard || !navigator.clipboard.readText) {
+    showError("Clipboard not available — paste manually");
+    venmoInput.focus();
+    return;
+  }
+  try {
+    const raw = await navigator.clipboard.readText();
+    const normalized = normalizeHandleClient(raw);
+    if (!normalized) {
+      showError("Clipboard didn't contain a valid Venmo handle");
+      return;
+    }
+    venmoInput.value = normalized;
+    venmoInput.focus();
+  } catch {
+    showError("Couldn't read clipboard — paste manually");
+    venmoInput.focus();
+  }
+});
 
 // --- Home / Join flow ---
 $on(createBtn, "click", () => {
