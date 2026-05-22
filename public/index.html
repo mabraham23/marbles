@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=15" />
+    <link rel="stylesheet" href="styles.css?v=17" />
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
@@ -16,6 +16,90 @@
         <h2 id="endedTitle">Game ended</h2>
         <p>This game is no longer running — the server may have restarted. Start a new one to keep playing.</p>
         <button id="endedHomeBtn" class="primary-button" type="button">Create new game</button>
+      </div>
+    </div>
+    <div id="rulesModal" class="modal-overlay" hidden>
+      <div class="modal-card rules-card" role="dialog" aria-modal="true" aria-labelledby="rulesTitle">
+        <header class="rules-header">
+          <div>
+            <span class="section-label">Quick rules</span>
+            <h2 id="rulesTitle">How to play</h2>
+          </div>
+          <button id="rulesCloseBtn" class="rules-close" type="button" aria-label="Close how to play">Close</button>
+        </header>
+
+        <div class="rules-grid">
+          <section class="rules-item">
+            <h3>1. Goal of the game</h3>
+            <div class="rules-board-demo rules-board-demo-large" data-rule-demo="goal" aria-hidden="true"></div>
+            <p>Move all of your marbles around the board and into your finish spaces. In team games, your team wins when every teammate's finish spaces are filled.</p>
+          </section>
+
+          <section class="rules-item">
+            <h3>2. Leaving home</h3>
+            <div class="rules-board-demo" data-rule-demo="leave" aria-hidden="true"></div>
+            <p>Roll <strong>1</strong> or <strong>6</strong> to leave home. If several marbles are home, only the leftmost one can leave.</p>
+            <p class="rules-example"><span>Example</span> If marbles 1, 2, and 3 are home, only marble 1 can leave. If 1 and 2 are already out, marble 3 is next.</p>
+          </section>
+
+          <section class="rules-item">
+            <h3>3. Traversing the board</h3>
+            <div class="rules-subrule">
+              <h4>Normal movement</h4>
+              <div class="rules-board-demo" data-rule-demo="traverse" aria-hidden="true"></div>
+              <p>Most rolls move your marble forward along the connected track holes.</p>
+            </div>
+            <div class="rules-subrule">
+              <h4>Corner shortcuts</h4>
+              <div class="rules-board-demo" data-rule-demo="corner" aria-hidden="true"></div>
+              <p>If your marble is sitting on a corner, a roll can jump forward by that many corners when the path is clear.</p>
+            </div>
+            <div class="rules-subrule">
+              <h4>Center</h4>
+              <div class="rules-board-demo" data-rule-demo="center" aria-hidden="true"></div>
+              <p>An exact roll can move into the center. Later, rolling <strong>1</strong> lets that marble exit to a corner.</p>
+            </div>
+          </section>
+
+          <section class="rules-item">
+            <h3>4. Taking your turn</h3>
+            <div class="rules-flow-demo" aria-hidden="true">
+              <div class="rules-dice-demo">4</div>
+              <div class="rules-options-demo">
+                <span>K1 moves 4</span>
+                <span class="active">K2 moves 4</span>
+                <span>K3 enters finish</span>
+              </div>
+            </div>
+            <p>On your turn, roll the dice. If moves are available, choose one highlighted board spot or one move from the list.</p>
+          </section>
+
+          <section class="rules-item">
+            <h3>5. When no moves are available</h3>
+            <div class="rules-flow-demo no-move-demo" aria-hidden="true">
+              <div class="rules-dice-demo">5</div>
+              <div class="rules-no-move-message">Rolled 5: no valid moves</div>
+            </div>
+            <p>If the roll cannot move any marble, the game shows a short no-move message and then continues.</p>
+          </section>
+
+          <section class="rules-item">
+            <h3>6. Captures</h3>
+            <div class="rules-board-demo" data-rule-demo="capture" aria-hidden="true"></div>
+            <p>Landing on another player bumps that marble back home. Your own marbles block your path.</p>
+            <p class="rules-example"><span>Example</span> If your marble lands exactly on an opponent, their marble returns home and yours takes that spot.</p>
+          </section>
+
+          <section class="rules-item">
+            <h3>7. Special cases</h3>
+            <div class="rules-board-demo" data-rule-demo="backward" aria-hidden="true"></div>
+            <p>Rolling <strong>1</strong> or <strong>6</strong> gives you another roll. Finish spaces require an exact roll.</p>
+            <p>If you leave home with a <strong>1</strong> and immediately roll <strong>3</strong>, that marble may move backward toward the gate. This does not apply after leaving with a <strong>6</strong>.</p>
+            <p class="rules-example"><span>Example</span> Leave home with 1, then roll 3: that marble may move backward. Leave home with 6, then roll 3: move normally.</p>
+          </section>
+        </div>
+
+        <button id="rulesGotItBtn" class="primary-button" type="button">Got it</button>
       </div>
     </div>
     <main class="app-shell">
@@ -123,6 +207,7 @@
       <!-- GAME VIEW -->
       <section id="gameView" hidden>
         <section class="turn-panel" aria-live="polite">
+          <button class="help-button" id="howToPlayButton" type="button" aria-haspopup="dialog">How to play</button>
           <div class="turn-copy">
             <span class="section-label">Current Turn</span>
             <p id="turnLabel">Loading…</p>
@@ -210,6 +295,6 @@
       </form>
     </section>
 
-    <script type="module" src="client.js?v=14"></script>
+    <script type="module" src="client.js?v=16"></script>
   </body>
 </html>

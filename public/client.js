@@ -1,8 +1,13 @@
 // Client: rendering, animation, WebSocket plumbing.
 import {
+  MARBLES_PER_PLAYER,
+  MAX_TRACK_PROGRESS,
+  CENTER_PROGRESS,
+  CORNER_PROGRESSES,
   TRACK_LEN,
   PLAYER_COLORS,
   PLAYER_STROKES,
+  createInitialState,
   modeLabel,
   PLACE,
   centerOccupant,
@@ -41,7 +46,7 @@ const ERROR_BANNER_MS = 2500;
 const CONNECTED_PILL_MS = 900;
 const OFFLINE_PILL_MS = 1200;
 const COPY_CONFIRM_MS = 1000;
-const NO_MOVE_NOTICE_MS = 1000;
+const NO_MOVE_NOTICE_MS = 1700;
 
 const nameForm = document.querySelector("#nameForm");
 const nameInput = document.querySelector("#nameInput");
@@ -75,6 +80,10 @@ const adminGameActions = document.querySelector("#adminGameActions");
 const connPill = document.querySelector("#connPill");
 const endedModal = document.querySelector("#endedModal");
 const endedHomeBtn = document.querySelector("#endedHomeBtn");
+const howToPlayButton = document.querySelector("#howToPlayButton");
+const rulesModal = document.querySelector("#rulesModal");
+const rulesCloseBtn = document.querySelector("#rulesCloseBtn");
+const rulesGotItBtn = document.querySelector("#rulesGotItBtn");
 
 // Client state
 const ui = {
@@ -450,6 +459,374 @@ $on(leaveBtn, "click", () => {
 $on(endedHomeBtn, "click", () => {
   if (endedModal) endedModal.hidden = true;
   location.href = location.pathname;
+});
+
+function demoMarbleIndex(player, index) {
+  return player * MARBLES_PER_PLAYER + index;
+}
+
+function makeRulesDemoState() {
+  return createInitialState({
+    playerCount: 4,
+    mode: "single",
+    playerNames: ["Black", "Red", "Yellow", "Blue"],
+  });
+}
+
+function setDemoMarble(state, player, index, place, progress = null, finish = null) {
+  const marble = state.marbles[demoMarbleIndex(player, index)];
+  marble.place = place;
+  marble.progress = progress;
+  marble.finish = finish;
+  return marble;
+}
+
+function demoTrackProgressForAbs(state, player, absTrackIndex) {
+  return (absTrackIndex - state.starts[player] + TRACK_LEN) % TRACK_LEN;
+}
+
+function demoMarbleBefore(marble) {
+  return {
+    player: marble.player,
+    index: marble.index,
+    seat: marble.seat,
+    place: marble.place,
+    progress: marble.progress,
+    finish: marble.finish,
+  };
+}
+
+function demoPathData(points) {
+  return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+}
+
+function demoViewBox(points, { minWidth = 260, minHeight = 96, pad = 36, aspect = 3.05 } = {}) {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  let minX = Math.min(...xs) - pad;
+  let maxX = Math.max(...xs) + pad;
+  let minY = Math.min(...ys) - pad;
+  let maxY = Math.max(...ys) + pad;
+  let width = Math.max(maxX - minX, minWidth);
+  let height = Math.max(maxY - minY, minHeight);
+  const currentAspect = width / height;
+  if (currentAspect < aspect) {
+    const nextWidth = height * aspect;
+    const delta = (nextWidth - width) / 2;
+    minX -= delta;
+    width = nextWidth;
+  } else if (currentAspect > aspect) {
+    const nextHeight = width / aspect;
+    const delta = (nextHeight - height) / 2;
+    minY -= delta;
+    height = nextHeight;
+  }
+  return `${minX.toFixed(1)} ${minY.toFixed(1)} ${width.toFixed(1)} ${height.toFixed(1)}`;
+}
+
+function makeDemoLastMove(marbleIdx, before, targetPlace, targetProgress, targetFinish = null, roll = null) {
+  return {
+    marbleIdx,
+    roll,
+    before,
+    after: { place: targetPlace, progress: targetProgress ?? null, finish: targetFinish ?? null },
+    targetPlace,
+    targetProgress: targetProgress ?? null,
+    targetFinish: targetFinish ?? null,
+    bumpedIdx: null,
+  };
+}
+
+function buildRulesDemo(kind) {
+  const state = makeRulesDemoState();
+  const viewerSeat = 0;
+  let movingIdx = demoMarbleIndex(0, 0);
+  let targetPoint = null;
+  let capture = false;
+  let bumpedIdx = null;
+  let bumpedPath = null;
+  let label = "";
+  let path = [];
+  let viewPoints = [];
+  let targetClass = "";
+
+  if (kind === "goal") {
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, 0);
+    movingIdx = demoMarbleIndex(0, 0);
+    const before = demoMarbleBefore(moving);
+    const lastMove = makeDemoLastMove(movingIdx, before, PLACE.FINISH, null, 3, 8);
+    path = renderBuildMovePath(state, lastMove, viewerSeat);
+    targetPoint = pointForMarbleState(state, 0, PLACE.FINISH, null, 3, 0, viewerSeat);
+    viewPoints = path;
+    label = "Black marble travels around the board and fills the finish spaces";
+  } else if (kind === "traverse") {
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, 7);
+    movingIdx = demoMarbleIndex(0, 0);
+    const before = demoMarbleBefore(moving);
+    const lastMove = makeDemoLastMove(movingIdx, before, PLACE.TRACK, 13, null, 6);
+    path = renderBuildMovePath(state, lastMove, viewerSeat);
+    targetPoint = pointForMarbleState(state, 0, PLACE.TRACK, 13, null, 0, viewerSeat);
+    viewPoints = path;
+    label = "Black marble moves forward along connected track holes";
+  } else if (kind === "corner") {
+    const fromProgress = CORNER_PROGRESSES[0];
+    const toProgress = CORNER_PROGRESSES[3];
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, fromProgress);
+    movingIdx = demoMarbleIndex(0, 0);
+    const before = demoMarbleBefore(moving);
+    const lastMove = makeDemoLastMove(movingIdx, before, PLACE.TRACK, toProgress, null, 3);
+    path = renderBuildMovePath(state, lastMove, viewerSeat);
+    targetPoint = pointForMarbleState(state, 0, PLACE.TRACK, toProgress, null, 0, viewerSeat);
+    viewPoints = path;
+    label = "Black marble jumps from one corner to another corner";
+  } else if (kind === "center") {
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, CENTER_PROGRESS - 1);
+    movingIdx = demoMarbleIndex(0, 0);
+    path = [
+      pointForMarbleState(state, 0, PLACE.TRACK, CENTER_PROGRESS - 1, null, 0, viewerSeat),
+      pointForMarbleState(state, 0, PLACE.CENTER, null, null, 0, viewerSeat),
+      pointForMarbleState(state, 0, PLACE.TRACK, CORNER_PROGRESSES[2], null, 0, viewerSeat),
+    ];
+    targetPoint = pointForMarbleState(state, 0, PLACE.CENTER, null, null, 0, viewerSeat);
+    targetClass = " center";
+    viewPoints = path;
+    label = "Black marble enters the center, then exits to a corner on a later roll";
+  } else if (kind === "leave") {
+    const moving = state.marbles[movingIdx];
+    const before = demoMarbleBefore(moving);
+    const lastMove = makeDemoLastMove(movingIdx, before, PLACE.TRACK, 0, null, 1);
+    path = renderBuildMovePath(state, lastMove, viewerSeat);
+    targetPoint = pointForMarbleState(state, 0, PLACE.TRACK, 0, null, 0, viewerSeat);
+    viewPoints = [
+      ...path,
+      ...Array.from({ length: MARBLES_PER_PLAYER }, (_, index) =>
+        pointForMarbleState(state, 0, PLACE.HOME, null, null, index, viewerSeat),
+      ),
+    ];
+    label = "Black marble 1 leaves home and moves to the start hole";
+  } else if (kind === "capture") {
+    const redStartAbs = state.starts[1];
+    const targetProgress = demoTrackProgressForAbs(state, 0, redStartAbs);
+    const sourceProgress = targetProgress - 3;
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, sourceProgress);
+    setDemoMarble(state, 1, 0, PLACE.TRACK, 0);
+    movingIdx = demoMarbleIndex(0, 0);
+    bumpedIdx = demoMarbleIndex(1, 0);
+    const before = demoMarbleBefore(moving);
+    const lastMove = makeDemoLastMove(movingIdx, before, PLACE.TRACK, targetProgress, null, 3);
+    path = renderBuildMovePath(state, lastMove, viewerSeat);
+    targetPoint = pointForMarbleState(state, 0, PLACE.TRACK, targetProgress, null, 0, viewerSeat);
+    bumpedPath = [
+      targetPoint,
+      pointForMarbleState(state, 1, PLACE.HOME, null, null, 0, viewerSeat),
+    ];
+    capture = true;
+    viewPoints = [
+      ...path,
+      ...bumpedPath,
+      ...Array.from({ length: MARBLES_PER_PLAYER }, (_, index) =>
+        pointForMarbleState(state, 1, PLACE.HOME, null, null, index, viewerSeat),
+      ),
+    ];
+    label = "Black marble lands on Red marble 1 and bumps it home";
+  } else if (kind === "finish") {
+    const sourceProgress = MAX_TRACK_PROGRESS - 1;
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, sourceProgress);
+    movingIdx = demoMarbleIndex(0, 0);
+    const before = demoMarbleBefore(moving);
+    const lastMove = makeDemoLastMove(movingIdx, before, PLACE.FINISH, null, 0, 2);
+    path = renderBuildMovePath(state, lastMove, viewerSeat);
+    targetPoint = pointForMarbleState(state, 0, PLACE.FINISH, null, 0, 0, viewerSeat);
+    viewPoints = [
+      ...path,
+      ...Array.from({ length: MARBLES_PER_PLAYER }, (_, slot) =>
+        pointForMarbleState(state, 0, PLACE.FINISH, null, slot, 0, viewerSeat),
+      ),
+    ];
+    label = "Black marble moves exactly into the first finish space";
+  } else {
+    const moving = setDemoMarble(state, 0, 0, PLACE.TRACK, 0);
+    movingIdx = demoMarbleIndex(0, 0);
+    const before = demoMarbleBefore(moving);
+    const lastMove = makeDemoLastMove(movingIdx, before, PLACE.TRACK, 81, null, 3);
+    path = renderBuildMovePath(state, lastMove, viewerSeat);
+    targetPoint = pointForMarbleState(state, 0, PLACE.TRACK, 81, null, 0, viewerSeat);
+    viewPoints = [
+      ...path,
+      pointForMarbleState(state, 0, PLACE.TRACK, 0, null, 0, viewerSeat),
+      pointForMarbleState(state, 0, PLACE.FINISH, null, 0, 0, viewerSeat),
+    ];
+    label = "After leaving home with 1, Black marble 1 moves backward toward the gate on a 3";
+  }
+
+  return {
+    state,
+    viewerSeat,
+    movingIdx,
+    targetPoint,
+    targetClass,
+    capture,
+    bumpedIdx,
+    bumpedPath,
+    label,
+    path,
+    viewBox: kind === "goal" ? "0 20 520 520" : demoViewBox(viewPoints),
+  };
+}
+
+function demoTokenGroup(tokenLayerEl, marble) {
+  return Array.from(tokenLayerEl.querySelectorAll("g")).find(
+    (group) => group.getAttribute("aria-label") === marbleToken(marble),
+  );
+}
+
+function appendAnimatedDemoToken(layer, marble, pathData, { dur = "2.4s", keyTimes = "0;0.68;1", keyPoints = "0;1;1" } = {}) {
+  const group = svgEl("g", { class: "rules-demo-token", "aria-hidden": "true" });
+  const motion = svgEl("animateMotion", {
+    dur,
+    repeatCount: "indefinite",
+    path: pathData,
+    keyTimes,
+    keyPoints,
+    calcMode: "linear",
+  });
+  group.append(motion);
+  group.append(svgEl("circle", {
+    class: "token",
+    cx: 0,
+    cy: 0,
+    r: 10,
+    fill: PLAYER_COLORS[marble.seat],
+    stroke: PLAYER_STROKES[marble.seat],
+  }));
+  const label = svgEl("text", {
+    class: "token-label",
+    x: 0,
+    y: 0.4,
+    fill: tokenLabelColor(marble.seat),
+  });
+  label.textContent = String(marble.index + 1);
+  group.append(label);
+  layer.append(group);
+}
+
+function renderRulesDemo(container, kind) {
+  const demo = buildRulesDemo(kind);
+  const fillId = `rulesBoardFill-${kind}`;
+  const clipId = `rulesBoardClip-${kind}`;
+  const svg = svgEl("svg", {
+    class: "rules-mini-board",
+    viewBox: demo.viewBox,
+    role: "img",
+    "aria-label": demo.label,
+  });
+
+  const defs = svgEl("defs");
+  const gradient = svgEl("linearGradient", { id: fillId, x1: "0", y1: "0", x2: "1", y2: "1" });
+  gradient.append(svgEl("stop", { offset: "0%", "stop-color": "#f1d9aa" }));
+  gradient.append(svgEl("stop", { offset: "100%", "stop-color": "#d9b572" }));
+  const clipPath = svgEl("clipPath", { id: clipId });
+  const boardClipShape = svgEl("polygon");
+  clipPath.append(boardClipShape);
+  defs.append(gradient, clipPath);
+  svg.append(defs);
+
+  const boardShapeEl = svgEl("polygon", {
+    class: "rules-mini-board-shape",
+    fill: `url(#${fillId})`,
+  });
+  const woodLayerEl = svgEl("g", { "clip-path": `url(#${clipId})` });
+  const finishLayerEl = svgEl("g");
+  const trackLayerEl = svgEl("g");
+  const homeLayerEl = svgEl("g");
+  const tokenLayerEl = svgEl("g");
+  const overlayLayerEl = svgEl("g");
+  svg.append(boardShapeEl, woodLayerEl, finishLayerEl, trackLayerEl, homeLayerEl, tokenLayerEl, overlayLayerEl);
+
+  renderBoardLayers(
+    {
+      boardShape: boardShapeEl,
+      boardClipShape,
+      woodLayer: woodLayerEl,
+      finishLayer: finishLayerEl,
+      trackLayer: trackLayerEl,
+      homeLayer: homeLayerEl,
+      tokenLayer: tokenLayerEl,
+    },
+    demo.state,
+    demo.viewerSeat,
+  );
+
+  const movingMarble = demo.state.marbles[demo.movingIdx];
+  demoTokenGroup(tokenLayerEl, movingMarble)?.classList.add("rules-demo-dim-token");
+  if (demo.bumpedIdx !== null) {
+    demoTokenGroup(tokenLayerEl, demo.state.marbles[demo.bumpedIdx])?.classList.add("rules-demo-dim-token");
+  }
+
+  const movingPathData = demoPathData(demo.path);
+  overlayLayerEl.append(svgEl("path", {
+    class: "rules-demo-path",
+    d: movingPathData,
+  }));
+  if (demo.bumpedPath) {
+    overlayLayerEl.append(svgEl("path", {
+      class: "rules-demo-path capture-return",
+      d: demoPathData(demo.bumpedPath),
+    }));
+  }
+  if (demo.targetPoint) {
+    overlayLayerEl.append(svgEl("circle", {
+      class: `rules-demo-target${demo.capture ? " capture" : ""}${demo.targetClass || ""}`,
+      cx: demo.targetPoint.x,
+      cy: demo.targetPoint.y,
+      r: 16,
+      style: `transform-origin:${demo.targetPoint.x}px ${demo.targetPoint.y}px`,
+    }));
+  }
+  appendAnimatedDemoToken(overlayLayerEl, movingMarble, movingPathData);
+  if (demo.bumpedPath && demo.bumpedIdx !== null) {
+    appendAnimatedDemoToken(overlayLayerEl, demo.state.marbles[demo.bumpedIdx], demoPathData(demo.bumpedPath), {
+      dur: "2.4s",
+      keyTimes: "0;0.46;0.78;1",
+      keyPoints: "0;0;1;1",
+    });
+  }
+
+  container.replaceChildren(svg);
+}
+
+function renderRulesDemos() {
+  if (!rulesModal) return;
+  rulesModal.querySelectorAll("[data-rule-demo]").forEach((container) => {
+    renderRulesDemo(container, container.dataset.ruleDemo);
+  });
+}
+
+function openRulesModal() {
+  if (!rulesModal) return;
+  rulesModal.hidden = false;
+  renderRulesDemos();
+  rulesModal.querySelector(".rules-card")?.scrollTo({ top: 0 });
+  rulesCloseBtn?.focus();
+}
+
+function closeRulesModal() {
+  if (!rulesModal) return;
+  rulesModal.hidden = true;
+  howToPlayButton?.focus();
+}
+
+$on(howToPlayButton, "click", openRulesModal);
+$on(rulesCloseBtn, "click", closeRulesModal);
+$on(rulesGotItBtn, "click", closeRulesModal);
+$on(rulesModal, "click", (event) => {
+  if (event.target === rulesModal) closeRulesModal();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && rulesModal && !rulesModal.hidden) {
+    closeRulesModal();
+  }
 });
 
 function renderLobby() {
@@ -999,13 +1376,13 @@ function ensureTurnNotice() {
 function flashNoMoveNotice(noMoveRoll) {
   if (noMoveNoticeTimer) clearTimeout(noMoveNoticeTimer);
 
-  const rollingPlayerName = ui.game.playerNames[noMoveRoll.player];
   const seat = ui.game.seatColors[noMoveRoll.player];
   const notice = ensureTurnNotice();
   notice.style.setProperty("--player-color", PLAYER_COLORS[seat]);
   notice.style.setProperty("--player-stroke", PLAYER_STROKES[seat]);
   notice.style.setProperty("--player-ink", tokenLabelColor(seat));
-  notice.textContent = `${rollingPlayerName}: No moves`;
+  notice.classList.add("no-move-turn-notice");
+  notice.textContent = `Rolled ${noMoveRoll.dieValue}: no valid moves`;
   notice.hidden = false;
   notice.classList.remove("turn-notice-pulse");
   void notice.offsetWidth;
@@ -1014,7 +1391,7 @@ function flashNoMoveNotice(noMoveRoll) {
   noMoveNoticeTimer = setTimeout(() => {
     noMoveNoticeTimer = null;
     notice.hidden = true;
-    notice.classList.remove("turn-notice-pulse");
+    notice.classList.remove("turn-notice-pulse", "no-move-turn-notice");
   }, NO_MOVE_NOTICE_MS);
 }
 
