@@ -380,6 +380,78 @@ export function getWinner(state) {
   return null;
 }
 
+// Returns indices into playerNames for the winning side. Empty when no winner.
+export function getWinningPlayers(state) {
+  if (!state || !state.gameOver || !state.winner) return [];
+  if (state.teams) {
+    const match = /^Team ([A-Z])$/.exec(state.winner);
+    if (!match) return [];
+    const idx = match[1].charCodeAt(0) - 65;
+    return Array.isArray(state.teams[idx]) ? [...state.teams[idx]] : [];
+  }
+  const idx = state.playerNames.indexOf(state.winner);
+  return idx >= 0 ? [idx] : [];
+}
+
+// Pure: builds a pairwise settlement plan from a finished game + entry fee.
+// Returns { pot, perWinnerShare, transfers: [{from, to, amount, sentAt, receivedAt}] }
+// or null if the game isn't over or there's no fee. All currency math is done
+// in cents internally so equal splits don't produce floating-point drift.
+export function computeSettlement(state, entryFee) {
+  const feeNumber = Number(entryFee);
+  if (!Number.isFinite(feeNumber) || feeNumber <= 0) return null;
+  if (!state || !state.gameOver || !state.winner) return null;
+
+  const winners = getWinningPlayers(state);
+  if (winners.length === 0) return null;
+
+  const cents = Math.round(feeNumber * 100);
+  const N = state.playerNames.length;
+  const potCents = N * cents;
+  const baseShareCents = Math.floor(potCents / winners.length);
+  const remainderCents = potCents - baseShareCents * winners.length;
+
+  const net = new Array(N).fill(-cents);
+  winners.forEach((p, i) => {
+    net[p] = baseShareCents - cents + (i === 0 ? remainderCents : 0);
+  });
+
+  const debtors = [];
+  const creditors = [];
+  for (let i = 0; i < N; i += 1) {
+    if (net[i] < 0) debtors.push({ player: i, owed: -net[i] });
+    else if (net[i] > 0) creditors.push({ player: i, credit: net[i] });
+  }
+  debtors.sort((a, b) => b.owed - a.owed);
+  creditors.sort((a, b) => b.credit - a.credit);
+
+  const transfers = [];
+  let di = 0;
+  let ci = 0;
+  while (di < debtors.length && ci < creditors.length) {
+    const d = debtors[di];
+    const c = creditors[ci];
+    const amt = Math.min(d.owed, c.credit);
+    transfers.push({
+      from: state.playerNames[d.player],
+      to: state.playerNames[c.player],
+      amount: amt / 100,
+      sentAt: null,
+      receivedAt: null,
+    });
+    d.owed -= amt;
+    c.credit -= amt;
+    if (d.owed === 0) di += 1;
+    if (c.credit === 0) ci += 1;
+  }
+
+  return {
+    pot: potCents / 100,
+    perWinnerShare: baseShareCents / 100,
+    transfers,
+  };
+}
+
 function nextPlayer(state) {
   state.currentPlayer = (state.currentPlayer + 1) % state.playerCount;
   if (state.currentPlayer === 0) state.turnNumber += 1;

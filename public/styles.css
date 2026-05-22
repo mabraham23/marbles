@@ -1480,3 +1480,211 @@ input::placeholder {
     height: 44px;
   }
 }
+
+/* ---------- Entry fee + Venmo settlement ---------- */
+
+.fee-field,
+.handle-field {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fee-input-wrap,
+.handle-input-wrap {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 245, 222, 0.08);
+  overflow: hidden;
+}
+
+.fee-prefix,
+.handle-prefix {
+  display: grid;
+  place-items: center;
+  padding: 0 12px;
+  font-weight: 800;
+  color: var(--muted);
+  background: rgba(224, 184, 112, 0.16);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.fee-input-wrap input,
+.handle-input-wrap input {
+  flex: 1;
+  min-height: var(--tap);
+  padding: 0 12px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: none;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.fee-banner {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(224, 184, 112, 0.34);
+  border-radius: var(--radius);
+  background: rgba(243, 196, 20, 0.08);
+  color: var(--wood-soft);
+  font-weight: 700;
+  text-align: center;
+}
+
+.fee-banner strong {
+  color: var(--accent-strong);
+}
+
+.tag-handle {
+  background: rgba(47, 138, 136, 0.85);
+  color: #fff;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.tag-missing {
+  background: rgba(184, 50, 58, 0.85);
+  color: #fff;
+}
+
+.settlement-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  margin-bottom: 10px;
+  display: grid;
+  gap: 12px;
+}
+
+.settlement-header .section-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.settlement-summary {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.settlement-summary strong {
+  color: var(--accent-strong);
+}
+
+.settlement-section {
+  display: grid;
+  gap: 8px;
+}
+
+.settlement-section h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.settlement-card {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 245, 222, 0.06);
+}
+
+.settlement-card.debt {
+  border-color: rgba(216, 175, 102, 0.45);
+  background: rgba(216, 175, 102, 0.08);
+}
+
+.settlement-card.credit {
+  border-color: rgba(47, 138, 136, 0.55);
+  background: rgba(47, 138, 136, 0.1);
+}
+
+.settlement-card.state-settled {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.settlement-card-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.settlement-card-title strong {
+  color: var(--accent-strong);
+}
+
+.settlement-card-sub {
+  margin-top: 2px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.settlement-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settlement-pay-btn {
+  flex: 1 1 auto;
+  text-decoration: none;
+  display: inline-grid;
+  place-items: center;
+  min-height: var(--tap);
+  padding: 0 14px;
+}
+
+.settlement-toggle {
+  flex: 1 1 auto;
+}
+
+.settlement-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  font-size: 0.92rem;
+}
+
+.settlement-row.state-settled {
+  opacity: 0.55;
+}
+
+.settlement-flow strong {
+  color: var(--ink);
+}
+
+.settlement-amount {
+  font-weight: 800;
+  color: var(--accent-strong);
+}
+
+.settlement-state {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}

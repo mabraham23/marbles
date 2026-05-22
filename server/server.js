@@ -16,6 +16,7 @@ import {
   legalMoves,
   applyMove,
   rollAndCompute,
+  computeSettlement,
 } from "../public/shared/rules.js";
 
 import { roomStore } from "./storage.js";
@@ -41,6 +42,27 @@ const MIME = {
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 4;
+
+const MAX_ENTRY_FEE = 10_000;
+const HANDLE_RE = /^[a-zA-Z0-9._-]{2,30}$/;
+
+function normalizeEntryFee(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const num = Number(raw);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  // Snap to cents and clamp.
+  const cents = Math.round(num * 100);
+  if (cents <= 0 || cents > MAX_ENTRY_FEE * 100) return null;
+  return cents / 100;
+}
+
+function normalizeHandle(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim().replace(/^@/, "");
+  if (!trimmed) return null;
+  if (!HANDLE_RE.test(trimmed)) return null;
+  return trimmed;
+}
 
 // ---------- In-Memory Connections ----------
 // WebSocket handles are transient and cannot be serialized to Redis.
@@ -96,7 +118,7 @@ function makeCode() {
   return code;
 }
 
-async function createRoom() {
+async function createRoom(opts = {}) {
   let code = "";
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const testCode = makeCode();
@@ -118,6 +140,9 @@ async function createRoom() {
     gameState: null,
     pendingMoves: null,
     pendingMovesFor: null,
+    entryFee: opts.entryFee ?? null,
+    playerHandles: {}, // { [playerName]: { venmo } }
+    settlement: null,
     createdAt: Date.now(),
     lastMoveAt: null,
     completedAt: null,
@@ -165,6 +190,9 @@ function lobbyStatePayload(room) {
     adminName: room.adminName,
     mode: room.mode,
     validModes: validModes(Math.max(2, room.players.length || 2)),
+    entryFee: room.entryFee ?? null,
+    playerHandles: room.playerHandles || {},
+    settlement: room.settlement || null,
   };
 }
 
@@ -178,6 +206,9 @@ function gameStatePayloadFor(room, recipientName) {
     payload.moves = room.pendingMoves;
     payload.movesFor = recipientName;
   }
+  if (room.entryFee) payload.entryFee = room.entryFee;
+  if (room.playerHandles) payload.playerHandles = room.playerHandles;
+  if (room.settlement) payload.settlement = room.settlement;
   return payload;
 }
 
@@ -197,14 +228,20 @@ async function broadcastGame(room) {
 
 // ---------- Handlers ----------
 
-async function handleCreateRoom(socket) {
+async function handleCreateRoom(socket, msg) {
   try {
-    const room = await createRoom();
+    const entryFee = msg ? normalizeEntryFee(msg.entryFee) : null;
+    const room = await createRoom({ entryFee });
     const conn = getConnections(room.code);
     conn.preJoinSockets.add(socket);
     socket.roomCode = room.code;
     socket.playerName = null;
-    safeSend(socket, { type: "roomCreated", code: room.code, adminToken: room.adminToken });
+    safeSend(socket, {
+      type: "roomCreated",
+      code: room.code,
+      adminToken: room.adminToken,
+      entryFee: room.entryFee,
+    });
   } catch (err) {
     console.error("Error creating room:", err);
     sendError(socket, "Could not create room");
@@ -239,6 +276,17 @@ async function handleJoinRoom(socket, msg) {
       }
     }
 
+    // If room has an entry fee, accept handle on join. We only require it
+    // when the player is newly joining a paid room and doesn't already have
+    // one on file from a prior join.
+    const incomingHandle = normalizeHandle(msg.venmoHandle);
+    if (room.entryFee) {
+      const alreadyHasHandle = Boolean(room.playerHandles?.[name]?.venmo);
+      if (!incomingHandle && !alreadyHasHandle) {
+        return sendError(socket, "needHandle:Venmo handle required for this room");
+      }
+    }
+
     if (room.phase === "lobby") {
       const existing = room.players.find((p) => p.name === name);
       if (existing) {
@@ -269,6 +317,12 @@ async function handleJoinRoom(socket, msg) {
       }
     } else if (room.adminName === name) {
       isAdmin = true;
+    }
+
+    // Stash/refresh the player's payment handle if they supplied one.
+    if (incomingHandle) {
+      room.playerHandles = room.playerHandles || {};
+      room.playerHandles[name] = { ...(room.playerHandles[name] || {}), venmo: incomingHandle };
     }
 
     // Attach socket properties
@@ -342,6 +396,12 @@ async function handleStartGame(socket) {
   if (room.phase !== "lobby") return sendError(socket, "Game already started");
   if (room.adminName !== name) return sendError(socket, "Only the admin can start");
   if (room.players.length < 2) return sendError(socket, "Need at least 2 players");
+  if (room.entryFee) {
+    const missing = room.players.filter((p) => !room.playerHandles?.[p.name]?.venmo);
+    if (missing.length) {
+      return sendError(socket, `Need Venmo handle for: ${missing.map((p) => p.name).join(", ")}`);
+    }
+  }
 
   const allowed = validModes(room.players.length);
   let mode = room.mode;
@@ -357,6 +417,7 @@ async function handleStartGame(socket) {
   room.phase = "playing";
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.settlement = null;
   room.lastMoveAt = Date.now();
   room.completedAt = null;
 
@@ -388,6 +449,7 @@ async function handleResetGame(socket) {
   room.phase = "playing";
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.settlement = null;
   room.lastMoveAt = Date.now();
   room.completedAt = null;
 
@@ -408,6 +470,8 @@ async function handleEndGame(socket) {
   room.gameState = null;
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  // Keep room.settlement so an unsettled payout list survives back-to-lobby.
+  // Cleared on the next startGame/resetGame.
   room.lastMoveAt = null;
   room.completedAt = null;
 
@@ -468,10 +532,56 @@ async function handleSubmitMove(socket, msg) {
 
   applyMove(room.gameState, move, room.gameState.pendingDieValue);
   room.lastMoveAt = Date.now();
-  if (room.gameState.gameOver) room.completedAt = room.lastMoveAt;
+  if (room.gameState.gameOver) {
+    room.completedAt = room.lastMoveAt;
+    if (room.entryFee && !room.settlement) {
+      room.settlement = computeSettlement(room.gameState, room.entryFee);
+    }
+  }
   room.pendingMoves = null;
   room.pendingMovesFor = null;
 
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
+}
+
+async function handleUpdateHandle(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  const handle = normalizeHandle(msg.venmoHandle);
+  if (!handle) return sendError(socket, "Invalid Venmo handle");
+  room.playerHandles = room.playerHandles || {};
+  room.playerHandles[name] = { ...(room.playerHandles[name] || {}), venmo: handle };
+  await roomStore.set(room.code, room);
+  if (room.phase === "lobby") await broadcastLobby(room);
+  else await broadcastGame(room);
+}
+
+async function handleMarkSent(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (!room.settlement) return sendError(socket, "No settlement to update");
+  const idx = Number(msg.transferIndex);
+  const transfer = room.settlement.transfers[idx];
+  if (!transfer) return sendError(socket, "Invalid transfer");
+  if (transfer.from !== name) return sendError(socket, "Only the sender can mark sent");
+  transfer.sentAt = msg.sent === false ? null : Date.now();
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
+}
+
+async function handleMarkReceived(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (!room.settlement) return sendError(socket, "No settlement to update");
+  const idx = Number(msg.transferIndex);
+  const transfer = room.settlement.transfers[idx];
+  if (!transfer) return sendError(socket, "Invalid transfer");
+  if (transfer.to !== name) return sendError(socket, "Only the recipient can mark received");
+  transfer.receivedAt = msg.received === false ? null : Date.now();
   await roomStore.set(room.code, room);
   await broadcastGame(room);
 }
@@ -522,16 +632,19 @@ async function handleMessage(socket, raw) {
 
   try {
     switch (msg.type) {
-      case "createRoom":  return await handleCreateRoom(socket);
-      case "joinRoom":    return await handleJoinRoom(socket, msg);
-      case "leaveRoom":   return await handleLeaveRoom(socket);
-      case "setMode":     return await handleSetMode(socket, msg);
-      case "startGame":   return await handleStartGame(socket);
-      case "resetGame":   return await handleResetGame(socket);
-      case "endGame":     return await handleEndGame(socket);
-      case "roll":        return await handleRoll(socket);
-      case "submitMove":  return await handleSubmitMove(socket, msg);
-      case "chat":        return await handleChat(socket, msg);
+      case "createRoom":     return await handleCreateRoom(socket, msg);
+      case "joinRoom":       return await handleJoinRoom(socket, msg);
+      case "leaveRoom":      return await handleLeaveRoom(socket);
+      case "setMode":        return await handleSetMode(socket, msg);
+      case "startGame":      return await handleStartGame(socket);
+      case "resetGame":      return await handleResetGame(socket);
+      case "endGame":        return await handleEndGame(socket);
+      case "roll":           return await handleRoll(socket);
+      case "submitMove":     return await handleSubmitMove(socket, msg);
+      case "updateHandle":   return await handleUpdateHandle(socket, msg);
+      case "markSent":       return await handleMarkSent(socket, msg);
+      case "markReceived":   return await handleMarkReceived(socket, msg);
+      case "chat":           return await handleChat(socket, msg);
       default:
         return sendError(socket, `Unknown message type: ${msg.type}`);
     }

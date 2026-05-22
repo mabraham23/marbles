@@ -27,8 +27,15 @@ const gameView = document.querySelector("#gameView");
 const errorBanner = document.querySelector("#errorBanner");
 
 const createBtn = document.querySelector("#createBtn");
+const entryFeeInput = document.querySelector("#entryFeeInput");
 const joinForm = document.querySelector("#joinForm");
 const joinCodeInput = document.querySelector("#joinCodeInput");
+const handleField = document.querySelector("#handleField");
+const handleFieldLabel = document.querySelector("#handleFieldLabel");
+const venmoInput = document.querySelector("#venmoInput");
+const lobbyFeeBanner = document.querySelector("#lobbyFeeBanner");
+const settlementPanel = document.querySelector("#settlementPanel");
+const LAST_VENMO_KEY = "lastVenmoHandle";
 const ROOM_CODE_LENGTH = 4;
 const ERROR_BANNER_MS = 2500;
 const CONNECTED_PILL_MS = 900;
@@ -75,7 +82,7 @@ const ui = {
   roomCode: null,
   myName: null,
   isAdmin: false,
-  lobby: null, // {players, adminName, mode, validModes}
+  lobby: null, // {players, adminName, mode, validModes, entryFee, playerHandles}
   game: null, // game state snapshot
   pendingMoves: null, // moves for current roll (current player only)
   socket: null,
@@ -84,6 +91,12 @@ const ui = {
   isChatOpen: false,
   unreadCount: 0,
   chatHistory: [],
+  // Entry-fee feature state
+  entryFee: null,        // number | null (room's fee, mirrored from lobby/game)
+  playerHandles: {},     // { name: { venmo } }
+  settlement: null,      // { pot, perWinnerShare, transfers }
+  pendingHandle: null,   // String handle user just typed; resent on auto-rejoin
+  handleRequired: false, // Server told us this room needs a handle (before we know the fee)
 };
 
 let diceSpinTimer = null;
@@ -100,6 +113,9 @@ function showView(name) {
   if (name === "home" || name === "name") homeView.hidden = false;
   if (name === "lobby") lobbyView.hidden = false;
   if (name === "game") gameView.hidden = false;
+  if (settlementPanel && (name === "home" || name === "name")) {
+    settlementPanel.hidden = true;
+  }
   if (name === "name") {
     nameForm.hidden = false;
     document.querySelector("#homeChoices").hidden = true;
@@ -206,12 +222,14 @@ function connect() {
     setConnState("connected");
     // If we were previously in a room, silently rejoin so the UI catches up.
     if (ui.roomCode && ui.myName) {
-      sock.send(JSON.stringify({
+      const payload = {
         type: "joinRoom",
         code: ui.roomCode,
         name: ui.myName,
         adminToken: loadAdminToken(ui.roomCode) || undefined,
-      }));
+      };
+      if (ui.pendingHandle) payload.venmoHandle = ui.pendingHandle;
+      sock.send(JSON.stringify(payload));
     }
   });
   sock.addEventListener("close", () => {
@@ -246,10 +264,12 @@ function handleServerMessage(msg) {
     case "roomCreated":
       ui.roomCode = msg.code;
       ui.isAdmin = true;
+      ui.entryFee = msg.entryFee || null;
       // Persist admin token
       try { localStorage.setItem(`adminToken:${msg.code}`, msg.adminToken); } catch {}
       // Update URL
       history.replaceState(null, "", `${location.pathname}?room=${msg.code}`);
+      applyHandleFieldVisibility();
       showView("name");
       break;
     case "joinedRoom":
@@ -261,6 +281,9 @@ function handleServerMessage(msg) {
       break;
     case "lobbyState":
       ui.lobby = msg;
+      ui.entryFee = msg.entryFee || null;
+      ui.playerHandles = msg.playerHandles || {};
+      ui.settlement = null;
       if (ui.view !== "lobby") showView("lobby");
       renderLobby();
       break;
@@ -268,6 +291,9 @@ function handleServerMessage(msg) {
       const state = msg.state;
       ui.game = state;
       ui.pendingMoves = msg.movesFor === ui.myName ? msg.moves || null : null;
+      ui.entryFee = msg.entryFee || null;
+      ui.playerHandles = msg.playerHandles || {};
+      ui.settlement = msg.settlement || null;
       if (ui.view !== "game") showView("game");
 
       renderGame();
@@ -292,13 +318,71 @@ function handleServerMessage(msg) {
         if (endedModal) endedModal.hidden = false;
         return;
       }
+      // Server says this room needs a Venmo handle — flip the handle field
+      // on and re-show the name view so the user can enter one.
+      if (typeof msg.message === "string" && msg.message.startsWith("needHandle:")) {
+        ui.handleRequired = true;
+        applyHandleFieldVisibility();
+        showView("name");
+        showError(msg.message.slice("needHandle:".length));
+        return;
+      }
       showError(msg.message);
       break;
   }
 }
 
+// --- Entry-fee helpers ---
+function normalizeHandleClient(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim().replace(/^@/, "");
+  if (!trimmed) return null;
+  if (!/^[a-zA-Z0-9._-]{2,30}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function formatMoney(amount) {
+  const n = Number(amount) || 0;
+  return Number.isInteger(n) ? `$${n}` : `$${n.toFixed(2)}`;
+}
+
+function venmoDeepLink(handle, amount, note) {
+  // Venmo universal link. On mobile with the app installed this opens the app
+  // and prefills; otherwise it falls back to the web flow in the same tab.
+  const params = new URLSearchParams({
+    txn: "pay",
+    recipients: handle,
+    amount: String(amount),
+    note: note || "Marbles",
+  });
+  return `https://venmo.com/?${params.toString()}`;
+}
+
+function applyHandleFieldVisibility() {
+  if (!handleField) return;
+  const needed = Boolean(ui.entryFee || ui.handleRequired);
+  handleField.hidden = !needed;
+  if (needed && !venmoInput.value) {
+    try {
+      const last = localStorage.getItem(LAST_VENMO_KEY);
+      if (last) venmoInput.value = last;
+    } catch {}
+  }
+  if (handleFieldLabel) {
+    handleFieldLabel.textContent = ui.entryFee
+      ? `Venmo handle (required — buy-in ${formatMoney(ui.entryFee)})`
+      : "Venmo handle";
+  }
+}
+
 // --- Home / Join flow ---
-$on(createBtn, "click", () => send({ type: "createRoom" }));
+$on(createBtn, "click", () => {
+  const rawFee = entryFeeInput && entryFeeInput.value.trim();
+  const feeNum = rawFee ? Number(rawFee) : 0;
+  const payload = { type: "createRoom" };
+  if (Number.isFinite(feeNum) && feeNum > 0) payload.entryFee = feeNum;
+  send(payload);
+});
 
 function beginJoinWithCode(code) {
   if (code.length !== ROOM_CODE_LENGTH) return;
@@ -326,7 +410,18 @@ $on(nameForm, "submit", (e) => {
   if (!ui.roomCode) { showError("No room code"); return; }
   let adminToken = null;
   try { adminToken = localStorage.getItem(`adminToken:${ui.roomCode}`) || undefined; } catch {}
-  send({ type: "joinRoom", code: ui.roomCode, name, adminToken });
+  const payload = { type: "joinRoom", code: ui.roomCode, name, adminToken };
+  if (venmoInput && venmoInput.value.trim()) {
+    const normalized = normalizeHandleClient(venmoInput.value);
+    if (!normalized) {
+      showError("Invalid Venmo handle");
+      return;
+    }
+    payload.venmoHandle = normalized;
+    ui.pendingHandle = normalized;
+    try { localStorage.setItem(LAST_VENMO_KEY, normalized); } catch {}
+  }
+  send(payload);
 });
 
 // --- Lobby ---
@@ -360,6 +455,19 @@ $on(endedHomeBtn, "click", () => {
 function renderLobby() {
   const { code, players, adminName, mode, validModes: vm } = ui.lobby;
   lobbyCodeLabel.textContent = code;
+
+  // Entry fee banner
+  if (lobbyFeeBanner) {
+    if (ui.entryFee) {
+      const pot = ui.entryFee * players.length;
+      lobbyFeeBanner.hidden = false;
+      lobbyFeeBanner.innerHTML = `Buy-in <strong>${escapeHTML(formatMoney(ui.entryFee))}</strong> per player · pot <strong>${escapeHTML(formatMoney(pot))}</strong>`;
+    } else {
+      lobbyFeeBanner.hidden = true;
+      lobbyFeeBanner.innerHTML = "";
+    }
+  }
+
   // Player list
   playerListEl.replaceChildren();
   for (let i = 0; i < 6; i += 1) {
@@ -370,7 +478,14 @@ function renderLobby() {
       li.classList.add("filled");
       const adminTag = p.name === adminName ? '<span class="tag">admin</span>' : "";
       const youTag = p.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
-      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${adminTag}${youTag}`;
+      const handle = ui.playerHandles?.[p.name]?.venmo || null;
+      let handleTag = "";
+      if (ui.entryFee) {
+        handleTag = handle
+          ? `<span class="tag tag-handle" title="Venmo: @${escapeHTML(handle)}">@${escapeHTML(handle)}</span>`
+          : '<span class="tag tag-missing">no handle</span>';
+      }
+      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${handleTag}${adminTag}${youTag}`;
     } else {
       li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-empty">waiting…</span>`;
     }
@@ -397,7 +512,15 @@ function renderLobby() {
     modePicker.textContent = "Need at least 2 players to start.";
   }
   startBtn.hidden = !ui.isAdmin;
-  startBtn.disabled = players.length < 2 || !mode;
+  const missingHandles = ui.entryFee
+    ? players.some((p) => !ui.playerHandles?.[p.name]?.venmo)
+    : false;
+  startBtn.disabled = players.length < 2 || !mode || missingHandles;
+  startBtn.title = missingHandles
+    ? "All players must add a Venmo handle before starting"
+    : "";
+
+  renderSettlement();
 }
 
 function escapeHTML(s) {
@@ -640,11 +763,148 @@ function renderGame() {
   }
   // Status
   renderStatus();
+  // Settlement
+  renderSettlement();
   // Board + animation
   renderBoard();
   if (state.lastMove) {
     animateLastMove(state.lastMove);
   }
+}
+
+function transferState(t) {
+  if (t.sentAt && t.receivedAt) return "settled";
+  if (t.sentAt) return "sent";
+  return "pending";
+}
+
+function renderSettlement() {
+  if (!settlementPanel) return;
+  const s = ui.settlement;
+  if (!s) {
+    settlementPanel.hidden = true;
+    settlementPanel.replaceChildren();
+    return;
+  }
+  settlementPanel.hidden = false;
+  settlementPanel.replaceChildren();
+
+  const me = ui.myName;
+  const handles = ui.playerHandles || {};
+  const settledCount = s.transfers.filter((t) => transferState(t) === "settled").length;
+
+  const header = document.createElement("header");
+  header.className = "settlement-header";
+  header.innerHTML = `
+    <div>
+      <span class="section-label">Settlement</span>
+      <p class="settlement-summary">Pot <strong>${escapeHTML(formatMoney(s.pot))}</strong> · winner share <strong>${escapeHTML(formatMoney(s.perWinnerShare))}</strong> · ${settledCount}/${s.transfers.length} settled</p>
+    </div>
+  `;
+  settlementPanel.append(header);
+
+  // Personal section: things involving me
+  const myDebts = [];
+  const myCredits = [];
+  const otherTransfers = [];
+  s.transfers.forEach((t, idx) => {
+    if (t.from === me) myDebts.push({ t, idx });
+    else if (t.to === me) myCredits.push({ t, idx });
+    else otherTransfers.push({ t, idx });
+  });
+
+  if (myDebts.length) {
+    const list = document.createElement("div");
+    list.className = "settlement-section";
+    list.innerHTML = `<h3>You owe</h3>`;
+    myDebts.forEach(({ t, idx }) => list.append(renderDebtCard(t, idx, handles)));
+    settlementPanel.append(list);
+  }
+  if (myCredits.length) {
+    const list = document.createElement("div");
+    list.className = "settlement-section";
+    list.innerHTML = `<h3>Owed to you</h3>`;
+    myCredits.forEach(({ t, idx }) => list.append(renderCreditCard(t, idx)));
+    settlementPanel.append(list);
+  }
+  if (otherTransfers.length) {
+    const list = document.createElement("div");
+    list.className = "settlement-section settlement-others";
+    list.innerHTML = `<h3>Others</h3>`;
+    otherTransfers.forEach(({ t }) => {
+      const row = document.createElement("div");
+      row.className = `settlement-row state-${transferState(t)}`;
+      row.innerHTML = `<span class="settlement-flow"><strong>${escapeHTML(t.from)}</strong> → <strong>${escapeHTML(t.to)}</strong></span><span class="settlement-amount">${escapeHTML(formatMoney(t.amount))}</span><span class="settlement-state">${transferState(t)}</span>`;
+      list.append(row);
+    });
+    settlementPanel.append(list);
+  }
+}
+
+function renderDebtCard(t, idx, handles) {
+  const recipientHandle = handles?.[t.to]?.venmo || null;
+  const noteCode = ui.roomCode ? ` ${ui.roomCode}` : "";
+  const state = transferState(t);
+  const card = document.createElement("div");
+  card.className = `settlement-card debt state-${state}`;
+
+  const head = document.createElement("div");
+  head.className = "settlement-card-head";
+  head.innerHTML = `
+    <div class="settlement-card-title">Pay <strong>${escapeHTML(formatMoney(t.amount))}</strong> to <strong>${escapeHTML(t.to)}</strong></div>
+    <div class="settlement-card-sub">${recipientHandle ? `Venmo @${escapeHTML(recipientHandle)}` : "No Venmo handle on file"}</div>
+  `;
+  card.append(head);
+
+  const actions = document.createElement("div");
+  actions.className = "settlement-actions";
+
+  if (recipientHandle) {
+    const link = venmoDeepLink(recipientHandle, t.amount, `Marbles${noteCode}`);
+    const a = document.createElement("a");
+    a.className = "primary-button settlement-pay-btn";
+    a.href = link;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "Open Venmo";
+    actions.append(a);
+  }
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = "secondary-button settlement-toggle";
+  toggleBtn.textContent = t.sentAt ? "Unmark sent" : "I sent it";
+  toggleBtn.addEventListener("click", () => {
+    send({ type: "markSent", transferIndex: idx, sent: !t.sentAt });
+  });
+  actions.append(toggleBtn);
+
+  card.append(actions);
+  return card;
+}
+
+function renderCreditCard(t, idx) {
+  const state = transferState(t);
+  const card = document.createElement("div");
+  card.className = `settlement-card credit state-${state}`;
+  card.innerHTML = `
+    <div class="settlement-card-head">
+      <div class="settlement-card-title"><strong>${escapeHTML(t.from)}</strong> owes you <strong>${escapeHTML(formatMoney(t.amount))}</strong></div>
+      <div class="settlement-card-sub">${t.sentAt ? "Sender marked sent" : "Awaiting payment"}</div>
+    </div>
+  `;
+  const actions = document.createElement("div");
+  actions.className = "settlement-actions";
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = "secondary-button settlement-toggle";
+  toggleBtn.textContent = t.receivedAt ? "Unmark received" : "Received";
+  toggleBtn.addEventListener("click", () => {
+    send({ type: "markReceived", transferIndex: idx, received: !t.receivedAt });
+  });
+  actions.append(toggleBtn);
+  card.append(actions);
+  return card;
 }
 
 function renderStatus() {

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=12" />
+    <link rel="stylesheet" href="styles.css?v=13" />
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
@@ -65,6 +65,13 @@
           <span class="marble-letter letter-red" aria-hidden="true">M</span><span class="marble-letter letter-yellow" aria-hidden="true">a</span><span class="marble-letter letter-green" aria-hidden="true">r</span><span class="marble-letter letter-blue" aria-hidden="true">b</span><span class="marble-letter letter-white" aria-hidden="true">l</span><span class="marble-letter letter-black" aria-hidden="true">e</span><span class="marble-letter letter-red" aria-hidden="true">s</span>
         </h1>
         <div id="homeChoices" class="home-choices">
+          <label class="fee-field">
+            <span>Entry fee per player (optional)</span>
+            <span class="fee-input-wrap">
+              <span class="fee-prefix">$</span>
+              <input id="entryFeeInput" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" />
+            </span>
+          </label>
           <button id="createBtn" class="primary-button" type="button">Create new game</button>
           <div class="or">or</div>
           <form id="joinForm" class="join-form">
@@ -79,6 +86,13 @@
             Username
             <input id="nameInput" type="text" autocomplete="given-name" maxlength="20" required />
           </label>
+          <label id="handleField" class="handle-field" hidden>
+            <span id="handleFieldLabel">Venmo handle</span>
+            <span class="handle-input-wrap">
+              <span class="handle-prefix">@</span>
+              <input id="venmoInput" type="text" autocomplete="username" maxlength="30" placeholder="your-venmo" />
+            </span>
+          </label>
           <button type="submit" class="primary-button">Continue</button>
         </form>
       </section>
@@ -92,6 +106,7 @@
           </div>
           <button id="copyLinkBtn" class="secondary-button" type="button">Copy invite link</button>
         </header>
+        <div id="lobbyFeeBanner" class="fee-banner" hidden></div>
         <ol id="playerList" class="lobby-list"></ol>
         <div id="modePicker" class="mode-picker"></div>
         <div class="lobby-actions">
@@ -99,6 +114,9 @@
           <button id="startBtn" class="primary-button" type="button" hidden>Start game</button>
         </div>
       </section>
+
+      <!-- SETTLEMENT PANEL (visible in lobby + game when applicable) -->
+      <section id="settlementPanel" class="settlement-panel" hidden aria-live="polite"></section>
 
       <!-- GAME VIEW -->
       <section id="gameView" hidden>
@@ -190,6 +208,6 @@
       </form>
     </section>
 
-    <script type="module" src="client.js?v=11"></script>
+    <script type="module" src="client.js?v=12"></script>
   </body>
 </html>
