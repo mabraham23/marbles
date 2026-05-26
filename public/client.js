@@ -48,6 +48,9 @@ const OFFLINE_PILL_MS = 1200;
 const COPY_CONFIRM_MS = 1000;
 const NO_MOVE_NOTICE_MS = 1700;
 const LOBBY_SYNC_MS = 5000;
+const CAPTURE_FLARE_MS = 1200;
+const TURN_TIME_LIMIT_OPTIONS = [0, 15, 30, 60];
+const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
 
 const nameForm = document.querySelector("#nameForm");
 const nameInput = document.querySelector("#nameInput");
@@ -56,10 +59,13 @@ const lobbyCodeLabel = document.querySelector("#lobbyCodeLabel");
 const copyLinkBtn = document.querySelector("#copyLinkBtn");
 const playerListEl = document.querySelector("#playerList");
 const modePicker = document.querySelector("#modePicker");
+const timeLimitPicker = document.querySelector("#timeLimitPicker");
 const startBtn = document.querySelector("#startBtn");
 const leaveBtn = document.querySelector("#leaveBtn");
 
 const board = document.querySelector("#board");
+const captureFlare = document.querySelector("#captureFlare");
+const captureFlareText = document.querySelector("#captureFlareText");
 const boardShape = document.querySelector("#boardShape");
 const boardClipShape = document.querySelector("#boardClipShape");
 const woodLayer = document.querySelector("#woodLayer");
@@ -72,10 +78,12 @@ const turnPanel = document.querySelector(".turn-panel");
 const turnLabel = document.querySelector("#turnLabel");
 const rollButton = document.querySelector("#rollButton");
 const dieValueEl = document.querySelector("#dieValue");
+const turnTimerChip = document.querySelector("#turnTimerChip");
 const movesPanel = document.querySelector("#movesPanel");
 const statusPanel = document.querySelector("#statusPanel");
 const resetGameBtn = document.querySelector("#resetGameButton");
 const endGameBtn = document.querySelector("#endGameButton");
+const adminGameDetails = document.querySelector("#adminGameDetails");
 const adminGameActions = document.querySelector("#adminGameActions");
 
 const connPill = document.querySelector("#connPill");
@@ -103,6 +111,8 @@ const ui = {
   chatHistory: [],
   // Entry-fee feature state
   entryFee: null,        // number | null (room's fee, mirrored from lobby/game)
+  turnTimeLimitSeconds: DEFAULT_TURN_TIME_LIMIT_SECONDS,
+  pendingMoveDeadlineAt: null,
   playerHandles: {},     // { name: { venmo } }
   settlement: null,      // { pot, perWinnerShare, transfers }
   pendingHandle: null,   // String handle user just typed; resent on auto-rejoin
@@ -113,6 +123,8 @@ let diceSpinTimer = null;
 let diceSpinValue = 1;
 let turnNoticeEl = null;
 let lobbySyncTimer = null;
+let turnTimerInterval = null;
+let captureFlareTimer = null;
 
 function $on(el, ev, fn) {
   if (el) el.addEventListener(ev, fn);
@@ -150,6 +162,10 @@ function showView(name) {
     ui.isChatOpen = false;
     ui.unreadCount = 0;
     updateChatBadge();
+  }
+  if (name !== "game") {
+    ui.pendingMoveDeadlineAt = null;
+    updateTurnTimer();
   }
   updateLobbySyncTimer();
 }
@@ -311,6 +327,8 @@ function handleServerMessage(msg) {
     case "lobbyState":
       ui.lobby = msg;
       ui.entryFee = msg.entryFee || null;
+      ui.turnTimeLimitSeconds = msg.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
+      ui.pendingMoveDeadlineAt = null;
       ui.playerHandles = msg.playerHandles || {};
       ui.settlement = null;
       if (ui.view !== "lobby") showView("lobby");
@@ -322,11 +340,14 @@ function handleServerMessage(msg) {
       ui.game = state;
       ui.pendingMoves = msg.movesFor === ui.myName ? msg.moves || null : null;
       ui.entryFee = msg.entryFee || null;
+      ui.turnTimeLimitSeconds = msg.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
+      ui.pendingMoveDeadlineAt = msg.pendingMoveDeadlineAt ?? null;
       ui.playerHandles = msg.playerHandles || {};
       ui.settlement = msg.settlement || null;
       if (ui.view !== "game") showView("game");
 
       renderGame();
+      updateTurnTimer();
       if (state.noMoveRoll && state.noMoveRoll.rollId !== ui.lastProcessedNoMoveRollId) {
         ui.lastProcessedNoMoveRollId = state.noMoveRoll.rollId;
         flashNoMoveNotice(state.noMoveRoll);
@@ -925,6 +946,28 @@ function renderLobby() {
   } else {
     modePicker.textContent = "Need at least 2 players to start.";
   }
+
+  if (timeLimitPicker) {
+    timeLimitPicker.replaceChildren();
+    const selectedLimit = ui.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
+    if (ui.isAdmin) {
+      const label = document.createElement("div");
+      label.className = "mode-label";
+      label.textContent = "Turn limit:";
+      timeLimitPicker.append(label);
+      TURN_TIME_LIMIT_OPTIONS.forEach((seconds) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `mode-button${selectedLimit === seconds ? " selected" : ""}`;
+        btn.textContent = seconds === 0 ? "Off" : `${seconds}s`;
+        btn.addEventListener("click", () => send({ type: "setTurnTimeLimit", seconds }));
+        timeLimitPicker.append(btn);
+      });
+    } else {
+      timeLimitPicker.textContent = `Turn limit: ${selectedLimit === 0 ? "Off" : `${selectedLimit}s`}`;
+    }
+  }
+
   startBtn.hidden = !ui.isAdmin;
   const missingHandles = ui.entryFee
     ? players.some((p) => !ui.playerHandles?.[p.name]?.venmo)
@@ -1119,7 +1162,9 @@ function renderGame() {
   const cp = state.currentPlayer;
   const seat = state.seatColors[cp];
   const isMyTurn = state.currentPlayer === localPlayerIdx();
+  if (adminGameDetails) adminGameDetails.hidden = !ui.isAdmin;
   resetGameBtn.hidden = !ui.isAdmin;
+  endGameBtn.hidden = !ui.isAdmin;
   adminGameActions.hidden = !ui.isAdmin;
 
   rollButton.style.setProperty("--dice-color", PLAYER_COLORS[seat]);
@@ -1183,6 +1228,37 @@ function renderGame() {
   renderBoard();
   if (state.lastMove) {
     animateLastMove(state.lastMove);
+    showCaptureFlare(state.lastMove);
+  }
+}
+
+function formatTurnLimit(seconds) {
+  return seconds === 0 ? "Off" : `${seconds}s`;
+}
+
+function updateTurnTimer() {
+  if (!turnTimerChip) return;
+  if (!ui.pendingMoveDeadlineAt || ui.view !== "game") {
+    turnTimerChip.hidden = true;
+    turnTimerChip.textContent = "";
+    turnTimerChip.classList.remove("is-active", "is-urgent");
+    if (turnTimerInterval) {
+      clearInterval(turnTimerInterval);
+      turnTimerInterval = null;
+    }
+    return;
+  }
+
+  const remaining = Math.max(0, Math.ceil((ui.pendingMoveDeadlineAt - Date.now()) / 1000));
+  const isMyTurn = ui.game?.currentPlayer === localPlayerIdx();
+  turnTimerChip.hidden = false;
+  turnTimerChip.textContent = `${remaining}s`;
+  turnTimerChip.title = `Move timer: ${formatTurnLimit(ui.turnTimeLimitSeconds)}`;
+  turnTimerChip.classList.toggle("is-active", Boolean(isMyTurn));
+  turnTimerChip.classList.toggle("is-urgent", remaining <= 5);
+
+  if (!turnTimerInterval) {
+    turnTimerInterval = setInterval(updateTurnTimer, 250);
   }
 }
 
@@ -1359,6 +1435,7 @@ function renderBoard() {
 }
 
 let lastAnimatedMoveSig = null;
+let lastCaptureFlareSig = null;
 
 function animateLastMove(lastMove) {
   const sig = JSON.stringify(lastMove);
@@ -1367,6 +1444,34 @@ function animateLastMove(lastMove) {
   const path = renderBuildMovePath(ui.game, lastMove, localSeat());
   const marble = ui.game.marbles[lastMove.marbleIdx];
   renderAnimateAlongPath(tokenLayer, marble, path, () => {});
+}
+
+function showCaptureFlare(lastMove) {
+  if (!captureFlare || !captureFlareText || !ui.game || lastMove.bumpedIdx == null) return;
+  const sig = JSON.stringify({
+    lastMove,
+    turnNumber: ui.game.turnNumber,
+    logEntry: ui.game.log?.[0] || "",
+  });
+  if (sig === lastCaptureFlareSig) return;
+  lastCaptureFlareSig = sig;
+
+  const killer = ui.game.marbles[lastMove.marbleIdx];
+  const killee = ui.game.marbles[lastMove.bumpedIdx];
+  const killerName = ui.game.playerNames[killer?.player] || "Someone";
+  const killeeName = ui.game.playerNames[killee?.player] || "someone";
+
+  captureFlareText.textContent = `${killerName} smoked ${killeeName}`;
+  captureFlare.hidden = false;
+  captureFlare.classList.remove("is-showing");
+  void captureFlare.offsetWidth;
+  captureFlare.classList.add("is-showing");
+
+  if (captureFlareTimer) clearTimeout(captureFlareTimer);
+  captureFlareTimer = setTimeout(() => {
+    captureFlare.hidden = true;
+    captureFlare.classList.remove("is-showing");
+  }, CAPTURE_FLARE_MS);
 }
 
 function setDiceFace(value) {
@@ -1443,11 +1548,13 @@ $on(rollButton, "click", () => {
 
 $on(resetGameBtn, "click", () => {
   if (!ui.isAdmin) return;
+  if (!window.confirm("Reset this game and start over from the beginning?")) return;
   send({ type: "resetGame" });
 });
 
 $on(endGameBtn, "click", () => {
   if (!ui.isAdmin) return;
+  if (!window.confirm("End this game and return everyone to the lobby?")) return;
   send({ type: "endGame" });
 });
 

@@ -13,10 +13,6 @@ import {
   MODES,
   validModes,
   createInitialState,
-  legalMoves,
-  applyMove,
-  rollAndCompute,
-  computeSettlement,
 } from "../public/shared/rules.js";
 
 import { roomStore } from "./storage.js";
@@ -25,6 +21,15 @@ import {
   ROOM_GC_INTERVAL_MS,
   roomShouldExpire,
 } from "./room-lifecycle.js";
+import {
+  DEFAULT_TURN_TIME_LIMIT_SECONDS,
+  TURN_TIMEOUT_SWEEP_MS,
+  continueTimedOutAutoPlay,
+  normalizeTurnTimeLimit,
+  rollForCurrentPlayer,
+  submitPendingMoveForRoom,
+  turnTimeLimitForRoom,
+} from "./turn-timeout.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const PUBLIC_DIR = resolve(__filename, "..", "..", "public");
@@ -45,6 +50,10 @@ const CODE_LENGTH = 4;
 
 const MAX_ENTRY_FEE = 10_000;
 const HANDLE_RE = /^[a-zA-Z0-9._-]{2,30}$/;
+
+function rollDie() {
+  return Math.floor(Math.random() * 6) + 1;
+}
 
 function normalizeEntryFee(raw) {
   if (raw === null || raw === undefined || raw === "") return null;
@@ -140,6 +149,9 @@ async function createRoom(opts = {}) {
     gameState: null,
     pendingMoves: null,
     pendingMovesFor: null,
+    pendingMoveDeadlineAt: null,
+    timedOutAutoPlayer: null,
+    turnTimeLimitSeconds: DEFAULT_TURN_TIME_LIMIT_SECONDS,
     entryFee: opts.entryFee ?? null,
     playerHandles: {}, // { [playerName]: { venmo } }
     settlement: null,
@@ -206,13 +218,19 @@ function lobbyStatePayload(room) {
     mode: room.mode,
     validModes: validModes(Math.max(2, room.players.length || 2)),
     entryFee: room.entryFee ?? null,
+    turnTimeLimitSeconds: turnTimeLimitForRoom(room),
     playerHandles: room.playerHandles || {},
     settlement: room.settlement || null,
   };
 }
 
 function gameStatePayloadFor(room, recipientName) {
-  const payload = { type: "gameState", state: room.gameState };
+  const payload = {
+    type: "gameState",
+    state: room.gameState,
+    turnTimeLimitSeconds: turnTimeLimitForRoom(room),
+    pendingMoveDeadlineAt: room.pendingMoveDeadlineAt ?? null,
+  };
   if (
     room.pendingMoves &&
     room.pendingMovesFor &&
@@ -417,6 +435,20 @@ async function handleSetMode(socket, msg) {
   await broadcastLobby(room);
 }
 
+async function handleSetTurnTimeLimit(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase !== "lobby") return sendError(socket, "Game already started");
+  if (room.adminName !== name) return sendError(socket, "Only the admin can change time limit");
+  const seconds = normalizeTurnTimeLimit(msg.seconds);
+  if (seconds === null) return sendError(socket, "Invalid time limit");
+  room.turnTimeLimitSeconds = seconds;
+
+  await roomStore.set(room.code, room);
+  await broadcastLobby(room);
+}
+
 async function handleStartGame(socket) {
   const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
@@ -445,6 +477,8 @@ async function handleStartGame(socket) {
   room.phase = "playing";
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.pendingMoveDeadlineAt = null;
+  room.timedOutAutoPlayer = null;
   room.settlement = null;
   room.lastMoveAt = Date.now();
   room.completedAt = null;
@@ -477,6 +511,8 @@ async function handleResetGame(socket) {
   room.phase = "playing";
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.pendingMoveDeadlineAt = null;
+  room.timedOutAutoPlayer = null;
   room.settlement = null;
   room.lastMoveAt = Date.now();
   room.completedAt = null;
@@ -498,6 +534,8 @@ async function handleEndGame(socket) {
   room.gameState = null;
   room.pendingMoves = null;
   room.pendingMovesFor = null;
+  room.pendingMoveDeadlineAt = null;
+  room.timedOutAutoPlayer = null;
   // Keep room.settlement so an unsettled payout list survives back-to-lobby.
   // Cleared on the next startGame/resetGame.
   room.lastMoveAt = null;
@@ -518,17 +556,7 @@ async function handleRoll(socket) {
   if (currentName !== name) return sendError(socket, "Not your turn");
   if (state.pendingRoll != null) return sendError(socket, "Already rolled");
 
-  const dieValue = Math.floor(Math.random() * 6) + 1;
-  const moves = rollAndCompute(state, dieValue);
-  if (moves.length > 0) {
-    room.pendingMoves = moves;
-    room.pendingMovesFor = currentName;
-  } else {
-    room.pendingMoves = null;
-    room.pendingMovesFor = null;
-  }
-  room.lastMoveAt = Date.now();
-  if (state.gameOver && !room.completedAt) room.completedAt = room.lastMoveAt;
+  rollForCurrentPlayer(room, rollDie(), Date.now());
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -543,31 +571,9 @@ async function handleSubmitMove(socket, msg) {
     return sendError(socket, "No pending move for you");
   }
   const moveIdx = Number(msg.moveIdx);
-  if (!Number.isInteger(moveIdx) || moveIdx < 0 || moveIdx >= room.pendingMoves.length) {
-    return sendError(socket, "Invalid move index");
-  }
-  const move = room.pendingMoves[moveIdx];
-  // Re-validate against current state to be safe.
-  const fresh = legalMoves(room.gameState, room.gameState.currentPlayer, room.gameState.pendingDieValue);
-  const stillLegal = fresh.some(
-    (m) =>
-      m.marbleIdx === move.marbleIdx &&
-      m.targetPlace === move.targetPlace &&
-      (m.targetProgress ?? null) === (move.targetProgress ?? null) &&
-      (m.targetFinish ?? null) === (move.targetFinish ?? null),
-  );
-  if (!stillLegal) return sendError(socket, "Move no longer legal");
-
-  applyMove(room.gameState, move, room.gameState.pendingDieValue);
-  room.lastMoveAt = Date.now();
-  if (room.gameState.gameOver) {
-    room.completedAt = room.lastMoveAt;
-    if (room.entryFee && !room.settlement) {
-      room.settlement = computeSettlement(room.gameState, room.entryFee);
-    }
-  }
-  room.pendingMoves = null;
-  room.pendingMovesFor = null;
+  const submitted = submitPendingMoveForRoom(room, moveIdx, Date.now());
+  if (!submitted.ok) return sendError(socket, submitted.error);
+  room.timedOutAutoPlayer = null;
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -665,6 +671,7 @@ async function handleMessage(socket, raw) {
       case "syncRoom":       return await handleSyncRoom(socket);
       case "leaveRoom":      return await handleLeaveRoom(socket);
       case "setMode":        return await handleSetMode(socket, msg);
+      case "setTurnTimeLimit": return await handleSetTurnTimeLimit(socket, msg);
       case "startGame":      return await handleStartGame(socket);
       case "resetGame":      return await handleResetGame(socket);
       case "endGame":        return await handleEndGame(socket);
@@ -764,6 +771,30 @@ const heartbeatTimer = setInterval(() => {
 }, HEARTBEAT_INTERVAL_MS);
 heartbeatTimer.unref();
 wss.on("close", () => clearInterval(heartbeatTimer));
+
+// Server-authoritative move timer. Expired move choices are auto-played.
+setInterval(async () => {
+  try {
+    const now = Date.now();
+    const rooms = await roomStore.list();
+    for (const room of rooms) {
+      const shouldContinueAuto = Boolean(room.timedOutAutoPlayer);
+      const deadlineExpired =
+        room.pendingMoveDeadlineAt &&
+        room.pendingMoveDeadlineAt <= now &&
+        room.pendingMoves &&
+        room.pendingMoves.length > 0;
+      if (!shouldContinueAuto && !deadlineExpired) continue;
+
+      const result = continueTimedOutAutoPlay(room, now, rollDie);
+      if (!result.changed) continue;
+      await roomStore.set(room.code, room);
+      await broadcastGame(room);
+    }
+  } catch (err) {
+    console.error("Error in turn-timeout interval:", err);
+  }
+}, TURN_TIMEOUT_SWEEP_MS).unref();
 
 // Periodic GC: delete completed games, inactive games, and abandoned empty rooms.
 setInterval(async () => {
