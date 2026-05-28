@@ -11,21 +11,6 @@
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
-    <button id="soundToggleBtn" class="audio-toggle-button sound-toggle-button" type="button" aria-label="Toggle sound effects" hidden>
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-        <path class="wave" d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
-        <line class="slash" x1="3" y1="3" x2="21" y2="21"/>
-      </svg>
-    </button>
-    <button id="musicToggleBtn" class="audio-toggle-button music-toggle-button" type="button" aria-label="Toggle background music" hidden>
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M9 18V5l12-2v13"/>
-        <circle cx="6" cy="18" r="3"/>
-        <circle cx="18" cy="16" r="3"/>
-        <line class="slash" x1="3" y1="3" x2="21" y2="21"/>
-      </svg>
-    </button>
     <div id="endedModal" class="modal-overlay" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="endedTitle">
         <h2 id="endedTitle">Game ended</h2>
@@ -222,17 +207,51 @@
         </div>
       </section>
 
+      <!-- TEAM STAGING VIEW -->
+      <section id="teamStagingView" class="card team-staging" hidden>
+        <header class="lobby-header">
+          <div>
+            <h1 class="title">Review Teams</h1>
+            <p class="subtitle">Code: <strong id="stagingCodeLabel">—</strong></p>
+          </div>
+          <button id="stagingBackBtn" class="secondary-button" type="button" hidden>Back to lobby</button>
+        </header>
+        <p class="team-staging-copy">The game will start shortly. Check your team and colors.</p>
+        <div id="stagingTeams" class="team-card-list"></div>
+        <p id="stagingWaiting" class="staging-waiting"></p>
+        <div class="lobby-actions team-staging-actions">
+          <button id="stagingStartBtn" class="primary-button" type="button" hidden>Start game</button>
+        </div>
+      </section>
+
       <!-- SETTLEMENT PANEL (visible in lobby + game when applicable) -->
       <section id="settlementPanel" class="settlement-panel" hidden aria-live="polite"></section>
 
       <!-- GAME VIEW -->
       <section id="gameView" hidden>
-        <section class="turn-panel" aria-live="polite">
+        <div class="game-top-controls">
           <button class="help-button" id="howToPlayButton" type="button" aria-haspopup="dialog">How to play</button>
-          <div class="turn-copy">
-            <span class="section-label">Current Turn</span>
-            <p id="turnLabel">Loading…</p>
+          <div class="game-audio-controls" aria-label="Audio controls">
+            <button id="soundToggleBtn" class="audio-toggle-button sound-toggle-button" type="button" aria-label="Toggle sound effects" hidden>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path class="wave" d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                <line class="slash" x1="3" y1="3" x2="21" y2="21"/>
+              </svg>
+            </button>
+            <button id="musicToggleBtn" class="audio-toggle-button music-toggle-button" type="button" aria-label="Toggle background music" hidden>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 18V5l12-2v13"/>
+                <circle cx="6" cy="18" r="3"/>
+                <circle cx="18" cy="16" r="3"/>
+                <line class="slash" x1="3" y1="3" x2="21" y2="21"/>
+              </svg>
+            </button>
           </div>
+        </div>
+        <section id="teamSummaryPanel" class="team-summary-panel" aria-label="Teams and current turn" hidden>
+          <p id="turnLabel" class="sr-only" aria-live="polite">Loading…</p>
+          <div id="teamSummaryList" class="team-summary-list"></div>
         </section>
 
         <section class="board-card" aria-label="Game board">
@@ -290,6 +309,7 @@
             <button class="dice-button" id="rollButton" type="button" aria-label="Roll dice"></button>
           </div>
           <div class="moves" id="movesPanel" aria-live="polite"></div>
+          <div id="gameCommsControls" class="game-comms-controls" aria-label="Chat controls"></div>
           <details class="game-details">
             <summary>Game info</summary>
             <div class="status" id="statusPanel"></div>
