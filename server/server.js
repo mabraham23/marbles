@@ -82,7 +82,7 @@ const roomJoinQueues = new Map();
 function getConnections(code) {
   let conn = roomConnections.get(code);
   if (!conn) {
-    conn = { socketsByName: new Map(), preJoinSockets: new Set() };
+    conn = { socketsByName: new Map(), preJoinSockets: new Set(), voiceParticipants: new Set() };
     roomConnections.set(code, conn);
   }
   return conn;
@@ -653,6 +653,51 @@ async function handleChat(socket, msg) {
   for (const s of conn.preJoinSockets) safeSend(s, payload);
 }
 
+// ---------- Voice chat (WebRTC mesh signaling) ----------
+// Voice membership is ephemeral and lives only in the in-memory connection
+// pool — never persisted to Redis. The server only relays signaling; audio
+// flows peer-to-peer between browsers.
+
+async function handleVoiceJoin(socket) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const conn = getConnections(found.room.code);
+  const name = found.name;
+
+  // Tell the joiner who is already in voice so it can open connections to them.
+  const peers = [...conn.voiceParticipants].filter((n) => n !== name);
+  safeSend(socket, { type: "voicePeers", peers });
+
+  conn.voiceParticipants.add(name);
+
+  // Tell everyone else that this player joined voice.
+  for (const [peerName, s] of conn.socketsByName) {
+    if (peerName !== name) safeSend(s, { type: "voicePeerJoined", name });
+  }
+}
+
+async function handleVoiceLeave(socket) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return;
+  const conn = getConnections(found.room.code);
+  const name = found.name;
+  if (!conn.voiceParticipants.delete(name)) return;
+  for (const [peerName, s] of conn.socketsByName) {
+    if (peerName !== name) safeSend(s, { type: "voicePeerLeft", name });
+  }
+}
+
+async function handleVoiceSignal(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return;
+  if (typeof msg.to !== "string") return;
+  const conn = getConnections(found.room.code);
+  const target = conn.socketsByName.get(msg.to);
+  if (!target) return;
+  // Relay the opaque WebRTC payload to the single named peer.
+  safeSend(target, { type: "voiceSignal", from: found.name, data: msg.data });
+}
+
 // ---------- Message router ----------
 
 async function handleMessage(socket, raw) {
@@ -681,6 +726,9 @@ async function handleMessage(socket, raw) {
       case "markSent":       return await handleMarkSent(socket, msg);
       case "markReceived":   return await handleMarkReceived(socket, msg);
       case "chat":           return await handleChat(socket, msg);
+      case "voiceJoin":      return await handleVoiceJoin(socket);
+      case "voiceLeave":     return await handleVoiceLeave(socket);
+      case "voiceSignal":    return await handleVoiceSignal(socket, msg);
       default:
         return sendError(socket, `Unknown message type: ${msg.type}`);
     }
@@ -748,8 +796,18 @@ wss.on("connection", (socket) => {
     conn.preJoinSockets.delete(socket);
     if (found.name) {
       // Only drop the socket reference if it matches; don't kick the player.
+      // (On reconnect the slot already points at the new socket — leave it.)
       const current = conn.socketsByName.get(found.name);
-      if (current === socket) conn.socketsByName.delete(found.name);
+      if (current === socket) {
+        conn.socketsByName.delete(found.name);
+        // This was the live socket, so the player really left: drop them from
+        // voice and notify peers so they tear down the connection.
+        if (conn.voiceParticipants.delete(found.name)) {
+          for (const [peerName, s] of conn.socketsByName) {
+            if (peerName !== found.name) safeSend(s, { type: "voicePeerLeft", name: found.name });
+          }
+        }
+      }
     }
     await deleteRoomIfEmpty(room);
   });

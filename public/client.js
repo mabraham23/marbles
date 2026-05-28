@@ -163,6 +163,19 @@ function showView(name) {
     ui.unreadCount = 0;
     updateChatBadge();
   }
+
+  // Manage voice button visibility. Voice is available in lobby and game.
+  const voiceToggleBtn = document.querySelector("#voiceToggleBtn");
+  const voicePanel = document.querySelector("#voicePanel");
+  if (name === "lobby" || name === "game") {
+    if (voiceToggleBtn) voiceToggleBtn.hidden = false;
+  } else {
+    if (voiceToggleBtn) voiceToggleBtn.hidden = true;
+    if (voicePanel) { voicePanel.hidden = true; voicePanel.classList.remove("open"); }
+    // Leaving the room: stop the mic and tear down any voice connections.
+    if (voice.active) leaveVoice();
+    voice.isOpen = false;
+  }
   if (name !== "game") {
     ui.pendingMoveDeadlineAt = null;
     updateTurnTimer();
@@ -323,6 +336,14 @@ function handleServerMessage(msg) {
       // Cache identity per-tab so a reload / brief disconnect rejoins silently.
       saveSession(msg.code, { name: msg.name, isAdmin: msg.isAdmin });
       requestRoomSync();
+      // If we were in voice before a disconnect, rejoin now that the server has
+      // bound this socket to the room (doing this in the socket 'open' handler
+      // would race ahead of joinRoom finishing). Stale peer connections are torn
+      // down so the mesh rebuilds; the local mic stream is preserved.
+      if (voice.active) {
+        for (const name of [...voice.peers.keys()]) closePeer(name);
+        send({ type: "voiceJoin" });
+      }
       break;
     case "lobbyState":
       ui.lobby = msg;
@@ -356,11 +377,26 @@ function handleServerMessage(msg) {
     case "chatHistory":
       handleChatHistory(msg.chat);
       break;
+    case "voicePeers":
+      // We just joined voice; open a connection to each existing participant.
+      for (const peer of msg.peers || []) connectToPeer(peer, ui.myName > peer);
+      renderVoice();
+      break;
+    case "voicePeerJoined":
+      if (voice.active && msg.name !== ui.myName) connectToPeer(msg.name, ui.myName > msg.name);
+      break;
+    case "voicePeerLeft":
+      closePeer(msg.name);
+      break;
+    case "voiceSignal":
+      onVoiceSignal(msg.from, msg.data);
+      break;
     case "error":
       // Server restarted (cold start) — room no longer exists. Surface a
       // friendly modal and stop the auto-rejoin loop instead of looping
       // through "Game not found" errors forever.
       if (msg.message === "Game not found" && ui.roomCode) {
+        if (voice.active) leaveVoice();
         clearSession(ui.roomCode);
         try { localStorage.removeItem(`adminToken:${ui.roomCode}`); } catch {}
         ui.roomCode = null;
@@ -1751,5 +1787,222 @@ $on(chatInput, "focus", () => {
     }
   }, 300);
 });
+
+// --- Voice Chat (WebRTC audio mesh) ---
+// Each participant opens a direct RTCPeerConnection to every other one. Audio
+// flows peer-to-peer; the /ws WebSocket only relays signaling. Nothing about
+// voice is persisted server-side.
+const voiceToggleBtn = document.querySelector("#voiceToggleBtn");
+const voicePanel = document.querySelector("#voicePanel");
+const voiceCloseBtn = document.querySelector("#voiceCloseBtn");
+const voiceJoinBtn = document.querySelector("#voiceJoinBtn");
+const voiceMuteBtn = document.querySelector("#voiceMuteBtn");
+const voiceParticipantsEl = document.querySelector("#voiceParticipants");
+const voiceAudioContainer = document.querySelector("#voiceAudioContainer");
+
+const ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  // STUN-only for now. If players on restrictive home networks can't hear each
+  // other, add a free TURN relay here (e.g. ExpressTURN) — one block, no other
+  // changes needed:
+  // { urls: "turn:relay1.expressturn.com:3478", username: "<id>", credential: "<key>" },
+];
+
+const voice = {
+  active: false,      // have we joined voice (mic on)?
+  muted: false,
+  isOpen: false,      // is the panel open?
+  localStream: null,
+  peers: new Map(),   // peerName -> { pc, audioEl, pendingCandidates: [] }
+};
+
+function getPeer(name) {
+  let peer = voice.peers.get(name);
+  if (peer) return peer;
+
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const audioEl = document.createElement("audio");
+  audioEl.autoplay = true;
+  audioEl.dataset.peer = name;
+  if (voiceAudioContainer) voiceAudioContainer.appendChild(audioEl);
+
+  peer = { pc, audioEl, pendingCandidates: [] };
+  voice.peers.set(name, peer);
+
+  if (voice.localStream) {
+    for (const track of voice.localStream.getTracks()) pc.addTrack(track, voice.localStream);
+  }
+  pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; };
+  pc.onicecandidate = (e) => {
+    if (e.candidate) send({ type: "voiceSignal", to: name, data: { candidate: e.candidate } });
+  };
+  pc.onconnectionstatechange = () => { renderVoice(); };
+  return peer;
+}
+
+async function connectToPeer(name, isInitiator) {
+  // Drop any stale connection to this peer first. This matters on reconnect:
+  // a returning player builds fresh peer connections, so everyone must discard
+  // the old one and renegotiate rather than reuse a dead RTCPeerConnection.
+  if (voice.peers.has(name)) closePeer(name);
+  const { pc } = getPeer(name);
+  if (!isInitiator) return; // the other side will send us an offer
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    send({ type: "voiceSignal", to: name, data: { sdp: pc.localDescription } });
+  } catch (err) {
+    console.warn("voice offer failed", err);
+  }
+}
+
+async function onVoiceSignal(from, data) {
+  if (!voice.active || !data) return;
+  const peer = getPeer(from);
+  const { pc } = peer;
+  try {
+    if (data.sdp) {
+      await pc.setRemoteDescription(data.sdp);
+      // Flush any ICE candidates that arrived before the description was set.
+      for (const c of peer.pendingCandidates) {
+        try { await pc.addIceCandidate(c); } catch {}
+      }
+      peer.pendingCandidates = [];
+      if (data.sdp.type === "offer") {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        send({ type: "voiceSignal", to: from, data: { sdp: pc.localDescription } });
+      }
+    } else if (data.candidate) {
+      if (pc.remoteDescription && pc.remoteDescription.type) {
+        try { await pc.addIceCandidate(data.candidate); } catch {}
+      } else {
+        peer.pendingCandidates.push(data.candidate);
+      }
+    }
+  } catch (err) {
+    console.warn("voice signal handling failed", err);
+  }
+}
+
+function closePeer(name) {
+  const peer = voice.peers.get(name);
+  if (!peer) return;
+  try { peer.pc.close(); } catch {}
+  if (peer.audioEl) {
+    peer.audioEl.srcObject = null;
+    peer.audioEl.remove();
+  }
+  voice.peers.delete(name);
+  renderVoice();
+}
+
+function applyMute() {
+  if (!voice.localStream) return;
+  for (const t of voice.localStream.getAudioTracks()) t.enabled = !voice.muted;
+}
+
+async function joinVoice() {
+  if (voice.active) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError("Voice chat isn't supported in this browser.");
+    return;
+  }
+  try {
+    voice.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    showError("Microphone access is needed to join voice.");
+    return;
+  }
+  voice.active = true;
+  voice.muted = false;
+  applyMute();
+  send({ type: "voiceJoin" });
+  renderVoice();
+}
+
+function leaveVoice() {
+  if (!voice.active) return;
+  send({ type: "voiceLeave" });
+  for (const name of [...voice.peers.keys()]) closePeer(name);
+  if (voice.localStream) {
+    for (const t of voice.localStream.getTracks()) t.stop();
+    voice.localStream = null;
+  }
+  voice.active = false;
+  voice.muted = false;
+  renderVoice();
+}
+
+function toggleMute() {
+  if (!voice.active) return;
+  voice.muted = !voice.muted;
+  applyMute();
+  renderVoice();
+}
+
+function toggleVoicePanel() {
+  if (!voicePanel) return;
+  voice.isOpen = !voice.isOpen;
+  voicePanel.hidden = !voice.isOpen;
+  voicePanel.classList.toggle("open", voice.isOpen);
+  if (voice.isOpen) renderVoice();
+}
+
+function renderVoice() {
+  if (voiceToggleBtn) voiceToggleBtn.classList.toggle("active", voice.active);
+  if (voiceJoinBtn) {
+    voiceJoinBtn.textContent = voice.active ? "Leave voice" : "Join voice";
+    voiceJoinBtn.classList.toggle("active", voice.active);
+  }
+  if (voiceMuteBtn) {
+    voiceMuteBtn.hidden = !voice.active;
+    voiceMuteBtn.textContent = voice.muted ? "Unmute" : "Mute";
+    voiceMuteBtn.classList.toggle("muted", voice.muted);
+  }
+  if (!voiceParticipantsEl) return;
+
+  voiceParticipantsEl.innerHTML = "";
+  const names = [];
+  if (voice.active) names.push(ui.myName);
+  for (const n of voice.peers.keys()) if (!names.includes(n)) names.push(n);
+
+  if (names.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "voice-empty";
+    empty.textContent = voice.active ? "Waiting for others to join…" : "No one in voice yet.";
+    voiceParticipantsEl.appendChild(empty);
+    return;
+  }
+
+  for (const n of names) {
+    const row = document.createElement("div");
+    row.className = "voice-participant";
+
+    const dot = document.createElement("span");
+    dot.className = "voice-dot";
+    dot.style.background = getColorForSender(n);
+
+    const label = document.createElement("span");
+    label.className = "voice-name";
+    label.textContent = n === ui.myName ? `${n} (you)` : n;
+
+    row.appendChild(dot);
+    row.appendChild(label);
+
+    if (n === ui.myName && voice.muted) {
+      const tag = document.createElement("span");
+      tag.className = "voice-muted-tag";
+      tag.textContent = "muted";
+      row.appendChild(tag);
+    }
+    voiceParticipantsEl.appendChild(row);
+  }
+}
+
+$on(voiceToggleBtn, "click", toggleVoicePanel);
+$on(voiceCloseBtn, "click", () => { if (voice.isOpen) toggleVoicePanel(); });
+$on(voiceJoinBtn, "click", () => { voice.active ? leaveVoice() : joinVoice(); });
+$on(voiceMuteBtn, "click", toggleMute);
 
 init();
