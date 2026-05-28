@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=17" />
+    <link rel="stylesheet" href="styles.css?v=18" />
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
@@ -316,6 +316,32 @@
       </form>
     </section>
 
-    <script type="module" src="client.js?v=16"></script>
+    <!-- Floating Voice Toggle Button -->
+    <button id="voiceToggleBtn" class="voice-toggle-button" type="button" aria-label="Toggle Voice Chat" hidden>
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    </button>
+
+    <!-- Voice Chat Panel -->
+    <section id="voicePanel" class="voice-panel" hidden>
+      <header class="voice-header">
+        <h2>Voice Chat</h2>
+        <button id="voiceCloseBtn" class="close-button" type="button" aria-label="Close Voice Chat">Back to game</button>
+      </header>
+      <div id="voiceParticipants" class="voice-participants"></div>
+      <div class="voice-controls">
+        <button id="voiceJoinBtn" class="voice-join-button" type="button">Join voice</button>
+        <button id="voiceMuteBtn" class="voice-mute-button" type="button" hidden>Mute</button>
+      </div>
+    </section>
+
+    <!-- Hidden container for per-peer remote audio elements -->
+    <div id="voiceAudioContainer" hidden aria-hidden="true"></div>
+
+    <script type="module" src="client.js?v=18"></script>
   </body>
 </html>

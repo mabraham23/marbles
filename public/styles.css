@@ -2056,6 +2056,204 @@ input::placeholder {
     width: 44px;
     height: 44px;
   }
+
+  .voice-toggle-button {
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 64px);
+  }
+
+  .voice-panel {
+    right: max(16px, env(safe-area-inset-right));
+    left: auto;
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 128px);
+    width: min(320px, calc(100vw - 32px));
+  }
+}
+
+/* ---------- Voice chat ---------- */
+
+.voice-toggle-button {
+  position: fixed;
+  bottom: 92px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(20, 24, 30, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  color: var(--accent-strong);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  z-index: 1000;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.voice-toggle-button:hover {
+  transform: scale(1.08) translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 15px rgba(216, 175, 102, 0.2);
+}
+
+.voice-toggle-button:active {
+  transform: scale(0.95);
+}
+
+/* When live in voice, the mic button glows green. */
+.voice-toggle-button.active {
+  color: #6ee7a0;
+  border-color: rgba(110, 231, 160, 0.6);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 14px rgba(110, 231, 160, 0.35);
+}
+
+.voice-panel {
+  position: fixed;
+  bottom: 156px;
+  right: 24px;
+  width: min(300px, calc(100vw - 48px));
+  background: rgba(11, 14, 20, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(224, 184, 112, 0.18);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.voice-panel[hidden] {
+  display: none;
+}
+
+.voice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(224, 184, 112, 0.12);
+}
+
+.voice-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--ink);
+  letter-spacing: 0.5px;
+}
+
+.voice-header .close-button {
+  min-height: 36px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(224, 184, 112, 0.22);
+  border-radius: 999px;
+  color: var(--ink);
+  font-family: var(--font-family);
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 12px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.voice-header .close-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.voice-participants {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.voice-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.voice-participant {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.voice-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
+}
+
+.voice-name {
+  flex: 1 1 auto;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.voice-muted-tag {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.voice-controls {
+  display: flex;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.voice-join-button,
+.voice-mute-button {
+  flex: 1 1 auto;
+  min-height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(224, 184, 112, 0.3);
+  background: rgba(224, 184, 112, 0.14);
+  color: var(--ink);
+  font-family: var(--font-family);
+  font-weight: 800;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, transform 0.1s;
+}
+
+.voice-join-button:hover,
+.voice-mute-button:hover {
+  background: rgba(224, 184, 112, 0.24);
+}
+
+.voice-join-button:active,
+.voice-mute-button:active {
+  transform: scale(0.97);
+}
+
+.voice-join-button.active {
+  background: rgba(184, 50, 58, 0.18);
+  border-color: rgba(184, 50, 58, 0.45);
+}
+
+.voice-mute-button.muted {
+  background: rgba(184, 50, 58, 0.22);
+  border-color: rgba(184, 50, 58, 0.5);
+}
+
+.voice-mute-button[hidden] {
+  display: none;
 }
 
 /* ---------- Entry fee + Venmo settlement ---------- */
