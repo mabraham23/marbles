@@ -11,6 +11,7 @@ dotenv.config();
 
 import {
   MODES,
+  assignSeats,
   validModes,
   createInitialState,
 } from "../public/shared/rules.js";
@@ -226,6 +227,19 @@ function lobbyStatePayload(room) {
   };
 }
 
+function teamStagingStatePayload(room) {
+  return {
+    type: "teamStagingState",
+    code: room.code,
+    players: room.players.map((p) => ({ name: p.name })),
+    adminName: room.adminName,
+    mode: room.mode,
+    entryFee: room.entryFee ?? null,
+    turnTimeLimitSeconds: turnTimeLimitForRoom(room),
+    playerHandles: room.playerHandles || {},
+  };
+}
+
 function gameStatePayloadFor(room, recipientName) {
   const payload = {
     type: "gameState",
@@ -252,6 +266,12 @@ async function broadcastLobby(room) {
   const conn = pruneRoomConnections(room.code);
   for (const socket of conn.socketsByName.values()) safeSend(socket, payload);
   for (const socket of conn.preJoinSockets) safeSend(socket, payload);
+}
+
+async function broadcastTeamStaging(room) {
+  const payload = teamStagingStatePayload(room);
+  const conn = pruneRoomConnections(room.code);
+  for (const socket of conn.socketsByName.values()) safeSend(socket, payload);
 }
 
 async function broadcastGame(room) {
@@ -322,8 +342,8 @@ async function handleJoinRoom(socket, msg) {
       }
     }
 
+    const existing = room.players.find((p) => p.name === name);
     if (room.phase === "lobby") {
-      const existing = room.players.find((p) => p.name === name);
       if (existing) {
         const liveSocket = conn.socketsByName.get(name);
         if (liveSocket && liveSocket !== socket && liveSocket.readyState === liveSocket.OPEN) {
@@ -333,6 +353,12 @@ async function handleJoinRoom(socket, msg) {
       } else {
         if (room.players.length >= 6) return sendError(socket, "Lobby full");
         room.players.push({ name });
+      }
+    } else if (room.phase === "staging") {
+      if (!existing) return sendError(socket, "Team review already started");
+      const liveSocket = conn.socketsByName.get(name);
+      if (liveSocket && liveSocket !== socket && liveSocket.readyState === liveSocket.OPEN) {
+        return sendError(socket, "Name taken");
       }
     } else {
       // Playing phase: only existing players may rejoin.
@@ -379,6 +405,8 @@ async function handleJoinRoom(socket, msg) {
 
     if (room.phase === "lobby") {
       await broadcastLobby(room);
+    } else if (room.phase === "staging") {
+      await broadcastTeamStaging(room);
     } else {
       await broadcastGame(room);
     }
@@ -391,6 +419,10 @@ async function handleSyncRoom(socket) {
   const { room, name } = found;
   if (room.phase === "lobby") {
     safeSend(socket, lobbyStatePayload(room));
+    return;
+  }
+  if (room.phase === "staging") {
+    safeSend(socket, teamStagingStatePayload(room));
     return;
   }
   if (room.phase === "playing" && room.gameState) {
@@ -419,6 +451,7 @@ async function handleLeaveRoom(socket) {
   await roomStore.set(room.code, room);
 
   if (room.phase === "lobby") await broadcastLobby(room);
+  else if (room.phase === "staging") await broadcastTeamStaging(room);
   else await broadcastGame(room);
   await deleteRoomIfEmpty(room);
 }
@@ -455,7 +488,7 @@ async function handleStartGame(socket) {
   const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
   const { room, name } = found;
-  if (room.phase !== "lobby") return sendError(socket, "Game already started");
+  if (room.phase !== "lobby" && room.phase !== "staging") return sendError(socket, "Game already started");
   if (room.adminName !== name) return sendError(socket, "Only the admin can start");
   if (room.players.length < 2) return sendError(socket, "Need at least 2 players");
   if (room.entryFee) {
@@ -469,6 +502,23 @@ async function handleStartGame(socket) {
   let mode = room.mode;
   if (!mode || !allowed.includes(mode)) mode = MODES.SINGLE;
   room.mode = mode;
+
+  const teamMode = Boolean(assignSeats(room.players.length, mode).teams);
+  if (room.phase === "lobby" && teamMode) {
+    room.phase = "staging";
+    room.gameState = null;
+    room.pendingMoves = null;
+    room.pendingMovesFor = null;
+    room.pendingMoveDeadlineAt = null;
+    room.noMoveAdvanceAt = null;
+    room.timedOutAutoPlayer = null;
+    room.lastMoveAt = null;
+    room.completedAt = null;
+
+    await roomStore.set(room.code, room);
+    await broadcastTeamStaging(room);
+    return;
+  }
 
   const playerNames = room.players.map((p) => p.name);
   room.gameState = createInitialState({
@@ -488,6 +538,27 @@ async function handleStartGame(socket) {
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
+}
+
+async function handleReturnToLobby(socket) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase !== "staging") return sendError(socket, "Team review is not active");
+  if (room.adminName !== name) return sendError(socket, "Only the admin can return to lobby");
+
+  room.phase = "lobby";
+  room.gameState = null;
+  room.pendingMoves = null;
+  room.pendingMovesFor = null;
+  room.pendingMoveDeadlineAt = null;
+  room.noMoveAdvanceAt = null;
+  room.timedOutAutoPlayer = null;
+  room.lastMoveAt = null;
+  room.completedAt = null;
+
+  await roomStore.set(room.code, room);
+  await broadcastLobby(room);
 }
 
 function makeFreshGameState(room) {
@@ -595,6 +666,7 @@ async function handleUpdateHandle(socket, msg) {
   room.playerHandles[name] = { ...(room.playerHandles[name] || {}), venmo: handle };
   await roomStore.set(room.code, room);
   if (room.phase === "lobby") await broadcastLobby(room);
+  else if (room.phase === "staging") await broadcastTeamStaging(room);
   else await broadcastGame(room);
 }
 
@@ -724,6 +796,7 @@ async function handleMessage(socket, raw) {
       case "setMode":        return await handleSetMode(socket, msg);
       case "setTurnTimeLimit": return await handleSetTurnTimeLimit(socket, msg);
       case "startGame":      return await handleStartGame(socket);
+      case "returnToLobby":   return await handleReturnToLobby(socket);
       case "resetGame":      return await handleResetGame(socket);
       case "endGame":        return await handleEndGame(socket);
       case "roll":           return await handleRoll(socket);

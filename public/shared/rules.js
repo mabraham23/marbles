@@ -89,6 +89,33 @@ export function teamLabel(state, player) {
   return `Team ${String.fromCharCode(65 + t)}`;
 }
 
+export function teamDisplayGroups({ players, playerNames, mode }) {
+  const names = (playerNames || players || []).map((player) => {
+    if (typeof player === "string") return player;
+    return player?.name || "";
+  });
+  if (names.length < 2) return [];
+
+  const { seatColors, teams } = assignSeats(names.length, mode);
+  if (!teams) return [];
+
+  return teams.map((team, teamIndex) => ({
+    index: teamIndex,
+    label: `Team ${String.fromCharCode(65 + teamIndex)}`,
+    players: team.map((playerIndex) => {
+      const seat = seatColors[playerIndex];
+      return {
+        playerIndex,
+        name: names[playerIndex] || `Player ${playerIndex + 1}`,
+        seat,
+        colorName: PLAYER_NAMES[seat],
+        fill: PLAYER_COLORS[seat],
+        stroke: PLAYER_STROKES[seat],
+      };
+    }),
+  }));
+}
+
 export function marbleToken(marble) {
   return `${PLAYER_SHORT[marble.seat]}${marble.index + 1}`;
 }

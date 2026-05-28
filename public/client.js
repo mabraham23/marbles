@@ -5,10 +5,12 @@ import {
   CENTER_PROGRESS,
   CORNER_PROGRESSES,
   TRACK_LEN,
+  PLAYER_NAMES,
   PLAYER_COLORS,
   PLAYER_STROKES,
   createInitialState,
   modeLabel,
+  teamDisplayGroups,
   PLACE,
   centerOccupant,
   marbleAtTrack,
@@ -31,6 +33,7 @@ import {
 // DOM refs
 const homeView = document.querySelector("#homeView");
 const lobbyView = document.querySelector("#lobbyView");
+const teamStagingView = document.querySelector("#teamStagingView");
 const gameView = document.querySelector("#gameView");
 const errorBanner = document.querySelector("#errorBanner");
 
@@ -66,6 +69,11 @@ const modePicker = document.querySelector("#modePicker");
 const timeLimitPicker = document.querySelector("#timeLimitPicker");
 const startBtn = document.querySelector("#startBtn");
 const leaveBtn = document.querySelector("#leaveBtn");
+const stagingCodeLabel = document.querySelector("#stagingCodeLabel");
+const stagingTeamsEl = document.querySelector("#stagingTeams");
+const stagingWaiting = document.querySelector("#stagingWaiting");
+const stagingBackBtn = document.querySelector("#stagingBackBtn");
+const stagingStartBtn = document.querySelector("#stagingStartBtn");
 
 const board = document.querySelector("#board");
 const captureFlare = document.querySelector("#captureFlare");
@@ -78,8 +86,9 @@ const finishLayer = document.querySelector("#finishLayer");
 const homeLayer = document.querySelector("#homeLayer");
 const tokenLayer = document.querySelector("#tokenLayer");
 const moveHintLayer = document.querySelector("#moveHintLayer");
-const turnPanel = document.querySelector(".turn-panel");
 const turnLabel = document.querySelector("#turnLabel");
+const teamSummaryPanel = document.querySelector("#teamSummaryPanel");
+const teamSummaryList = document.querySelector("#teamSummaryList");
 const rollButton = document.querySelector("#rollButton");
 const dieValueEl = document.querySelector("#dieValue");
 const turnTimerChip = document.querySelector("#turnTimerChip");
@@ -99,14 +108,16 @@ const howToPlayButton = document.querySelector("#howToPlayButton");
 const rulesModal = document.querySelector("#rulesModal");
 const rulesCloseBtn = document.querySelector("#rulesCloseBtn");
 const rulesGotItBtn = document.querySelector("#rulesGotItBtn");
+const gameCommsControls = document.querySelector("#gameCommsControls");
 
 // Client state
 const ui = {
-  view: "home", // 'home' | 'name' | 'lobby' | 'game'
+  view: "home", // 'home' | 'name' | 'lobby' | 'staging' | 'game'
   roomCode: null,
   myName: null,
   isAdmin: false,
   lobby: null, // {players, adminName, mode, validModes, entryFee, playerHandles}
+  staging: null, // {players, adminName, mode, entryFee, playerHandles}
   game: null, // game state snapshot
   pendingMoves: null, // moves for current roll (current player only)
   socket: null,
@@ -138,11 +149,13 @@ function $on(el, ev, fn) {
 
 function showView(name) {
   ui.view = name;
-  for (const v of [homeView, lobbyView, gameView]) v.hidden = true;
+  document.body.dataset.view = name;
+  for (const v of [homeView, lobbyView, teamStagingView, gameView]) v.hidden = true;
   if (name === "home" || name === "name") homeView.hidden = false;
   if (name === "lobby") lobbyView.hidden = false;
+  if (name === "staging") teamStagingView.hidden = false;
   if (name === "game") gameView.hidden = false;
-  if (settlementPanel && (name === "home" || name === "name")) {
+  if (settlementPanel && (name === "home" || name === "name" || name === "staging")) {
     settlementPanel.hidden = true;
   }
   if (name === "name") {
@@ -157,7 +170,14 @@ function showView(name) {
   // Manage chat visibility
   const chatToggleBtn = document.querySelector("#chatToggleBtn");
   const chatDrawer = document.querySelector("#chatDrawer");
-  if (name === "lobby" || name === "game") {
+  const voiceToggleBtn = document.querySelector("#voiceToggleBtn");
+  if (chatToggleBtn && voiceToggleBtn && gameCommsControls) {
+    const desiredParent = name === "game" ? gameCommsControls : document.body;
+    if (chatToggleBtn.parentElement !== desiredParent) desiredParent.append(chatToggleBtn);
+    if (voiceToggleBtn.parentElement !== desiredParent) desiredParent.append(voiceToggleBtn);
+  }
+  const roomView = name === "lobby" || name === "staging" || name === "game";
+  if (roomView) {
     if (chatToggleBtn) chatToggleBtn.hidden = false;
   } else {
     if (chatToggleBtn) chatToggleBtn.hidden = true;
@@ -170,13 +190,12 @@ function showView(name) {
     updateChatBadge();
   }
 
-  // Sound toggle is available in lobby and game.
-  if (soundToggleBtn) soundToggleBtn.hidden = !(name === "lobby" || name === "game");
+  // Sound toggle is available in room views.
+  if (soundToggleBtn) soundToggleBtn.hidden = !roomView;
 
-  // Manage voice button visibility. Voice is available in lobby and game.
-  const voiceToggleBtn = document.querySelector("#voiceToggleBtn");
+  // Manage voice button visibility. Voice is available in room views.
   const voicePanel = document.querySelector("#voicePanel");
-  if (name === "lobby" || name === "game") {
+  if (roomView) {
     if (voiceToggleBtn) voiceToggleBtn.hidden = false;
   } else {
     if (voiceToggleBtn) voiceToggleBtn.hidden = true;
@@ -322,7 +341,7 @@ function updateLobbySyncTimer() {
     clearInterval(lobbySyncTimer);
     lobbySyncTimer = null;
   }
-  if (ui.view !== "lobby" || !ui.roomCode || !ui.myName) return;
+  if ((ui.view !== "lobby" && ui.view !== "staging") || !ui.roomCode || !ui.myName) return;
   lobbySyncTimer = setInterval(requestRoomSync, LOBBY_SYNC_MS);
 }
 
@@ -374,6 +393,19 @@ function handleServerMessage(msg) {
       ui.settlement = null;
       if (ui.view !== "lobby") showView("lobby");
       renderLobby();
+      renderChat();
+      updateLobbySyncTimer();
+      break;
+    case "teamStagingState":
+      ui.staging = msg;
+      ui.lobby = null;
+      ui.entryFee = msg.entryFee || null;
+      ui.turnTimeLimitSeconds = msg.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
+      ui.pendingMoveDeadlineAt = null;
+      ui.playerHandles = msg.playerHandles || {};
+      ui.settlement = null;
+      if (ui.view !== "staging") showView("staging");
+      renderTeamStaging();
       renderChat();
       updateLobbySyncTimer();
       break;
@@ -551,6 +583,8 @@ $on(copyLinkBtn, "click", async () => {
 });
 
 $on(startBtn, "click", () => send({ type: "startGame" }));
+$on(stagingStartBtn, "click", () => send({ type: "startGame" }));
+$on(stagingBackBtn, "click", () => send({ type: "returnToLobby" }));
 $on(leaveBtn, "click", () => {
   const code = ui.roomCode;
   send({ type: "leaveRoom" });
@@ -950,6 +984,74 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+function teamPlayerChipHTML(player, { compact = false, currentPlayerIndex = null } = {}) {
+  const youTag = player.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
+  const currentTurn = compact && player.playerIndex === currentPlayerIndex;
+  const turnIcon = currentTurn
+    ? '<span class="turn-dice" aria-label="Current turn" title="Current turn"><span></span><span></span><span></span></span>'
+    : "";
+  return (
+    `<span class="team-player-chip${compact ? " compact" : ""}${currentTurn ? " current-turn" : ""}">` +
+      `<span class="team-color-dot" style="background:${player.fill};border-color:${player.stroke};color:${tokenLabelColor(player.seat)}"></span>` +
+      `<span class="team-player-copy">` +
+        `<span class="team-player-name">${escapeHTML(player.name)}</span>` +
+        `<span class="team-player-color">${escapeHTML(player.colorName)}</span>` +
+      `</span>` +
+      `${turnIcon}` +
+      `${youTag}` +
+    `</span>`
+  );
+}
+
+function renderTeamCards(container, groups, { compact = false, currentPlayerIndex = null } = {}) {
+  if (!container) return;
+  container.replaceChildren();
+  groups.forEach((group) => {
+    const card = document.createElement("section");
+    card.className = compact
+      ? `team-summary-group${group.type === "players" ? " all-players" : ""}`
+      : "team-card";
+    if (compact) {
+      const playerColumns = group.type === "players"
+        ? group.players.length
+        : group.players.length >= 3
+          ? 1
+        : groups.length <= 2
+          ? Math.min(group.players.length, 2)
+        : 1;
+      card.style.setProperty("--player-columns", String(Math.max(1, playerColumns)));
+    }
+    card.innerHTML =
+      `<h2>${escapeHTML(group.label)}</h2>` +
+      `<div class="${compact ? "team-summary-players" : "team-card-players"}">` +
+        group.players.map((player) => teamPlayerChipHTML(player, { compact, currentPlayerIndex })).join("") +
+      `</div>`;
+    container.append(card);
+  });
+}
+
+function lobbyTeamGroups(lobby) {
+  if (!lobby) return [];
+  return teamDisplayGroups({ players: lobby.players, mode: lobby.mode });
+}
+
+function renderTeamStaging() {
+  const staging = ui.staging;
+  if (!staging) return;
+  const groups = teamDisplayGroups({ players: staging.players, mode: staging.mode });
+
+  if (stagingCodeLabel) stagingCodeLabel.textContent = staging.code;
+  renderTeamCards(stagingTeamsEl, groups);
+
+  if (stagingStartBtn) stagingStartBtn.hidden = !ui.isAdmin;
+  if (stagingBackBtn) stagingBackBtn.hidden = !ui.isAdmin;
+  if (stagingWaiting) {
+    stagingWaiting.textContent = ui.isAdmin
+      ? "Start when everyone has found their team."
+      : `Waiting for ${staging.adminName} to start the game.`;
+  }
+}
+
 function renderLobby() {
   const { code, players, adminName, mode, validModes: vm } = ui.lobby;
   lobbyCodeLabel.textContent = code;
@@ -1035,6 +1137,8 @@ function renderLobby() {
   const missingHandles = ui.entryFee
     ? players.some((p) => !ui.playerHandles?.[p.name]?.venmo)
     : false;
+  const teamMode = lobbyTeamGroups(ui.lobby).length > 0;
+  startBtn.textContent = teamMode ? "Review teams" : "Start game";
   startBtn.disabled = players.length < 2 || !mode || missingHandles;
   startBtn.title = missingHandles
     ? "All players must add a Venmo handle before starting"
@@ -1285,6 +1389,8 @@ function renderGame() {
     empty.textContent = "No move available.";
     movesPanel.append(empty);
   }
+  // Teams
+  renderPinnedTeamSummary();
   // Status
   renderStatus();
   // Settlement
@@ -1295,6 +1401,38 @@ function renderGame() {
     animateLastMove(state.lastMove);
     showCaptureFlare(state.lastMove);
   }
+}
+
+function renderPinnedTeamSummary() {
+  if (!teamSummaryPanel || !teamSummaryList || !ui.game) return;
+  let groups = teamDisplayGroups({
+    playerNames: ui.game.playerNames,
+    mode: ui.game.mode,
+  });
+  if (!groups.length) {
+    groups = [{
+      index: 0,
+      label: "Players",
+      type: "players",
+      players: ui.game.playerNames.map((name, playerIndex) => {
+        const seat = ui.game.seatColors[playerIndex];
+        return {
+          playerIndex,
+          name,
+          seat,
+          colorName: PLAYER_NAMES[seat],
+          fill: PLAYER_COLORS[seat],
+          stroke: PLAYER_STROKES[seat],
+        };
+      }),
+    }];
+  }
+  teamSummaryPanel.hidden = false;
+  teamSummaryList.style.setProperty("--team-count", Math.max(1, groups.length));
+  renderTeamCards(teamSummaryList, groups, {
+    compact: true,
+    currentPlayerIndex: ui.game.currentPlayer,
+  });
 }
 
 function formatTurnLimit(seconds) {
@@ -1467,7 +1605,6 @@ function renderStatus() {
   const rows = [];
   for (let player = 0; player < state.playerCount; player += 1) {
     const seat = state.seatColors[player];
-    const teamSuffix = state.teams ? `Team ${String.fromCharCode(65 + state.teams.findIndex((t) => t.includes(player)))}` : `Player ${player + 1}`;
     const playerMarbles = state.marbles.filter((m) => m.player === player);
     const atHome = playerMarbles.filter((m) => m.place === PLACE.HOME).length;
     const finished = playerMarbles.filter((m) => m.place === PLACE.FINISH).length;
@@ -1482,7 +1619,6 @@ function renderStatus() {
           `<span class="stat-badge home-badge" title="Marbles still at Home">🏠 ${atHome}</span>` +
           `<span class="stat-badge finish-badge" title="Marbles made it Home">🏁 ${finished}</span>` +
         `</div>` +
-        `<span class="team-badge">${teamSuffix}</span>` +
       `</div>`,
     );
   }
@@ -1797,10 +1933,10 @@ function init() {
     if (session && session.name) {
       // We've been in this room before in this tab. Prime myName so the WS
       // onopen handler silently rejoins, and skip the name form. The
-      // lobbyState / gameState message that follows will pick the right view.
+      // lobbyState / teamStagingState / gameState message that follows will pick the right view.
       ui.myName = session.name;
       ui.isAdmin = !!session.isAdmin;
-      for (const v of [homeView, lobbyView, gameView]) v.hidden = true;
+      for (const v of [homeView, lobbyView, teamStagingView, gameView]) v.hidden = true;
     } else {
       showView("name");
     }

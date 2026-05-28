@@ -6,6 +6,7 @@ import {
   validModes,
   assignSeats,
   createInitialState,
+  teamDisplayGroups,
   rollAndCompute,
   advanceNoMoveRoll,
   applyMove,
@@ -70,6 +71,64 @@ test("assignSeats — invalid mode falls back to single", () => {
   const { seatColors, teams } = assignSeats(3, MODES.PAIRS);
   assert.deepEqual(seatColors, [0, 2, 4]);
   assert.equal(teams, null);
+});
+
+test("teamDisplayGroups returns no groups for free-for-all", () => {
+  assert.deepEqual(teamDisplayGroups({
+    mode: MODES.SINGLE,
+    playerNames: ["Admin", "Player 2", "Player 3", "Player 4", "Player 5", "Player 6"],
+  }), []);
+});
+
+test("teamDisplayGroups describes 4-player pairs", () => {
+  const groups = teamDisplayGroups({
+    mode: MODES.PAIRS,
+    playerNames: ["Admin", "Player 2", "Player 3", "Player 4"],
+  });
+
+  assert.deepEqual(groups.map((group) => group.label), ["Team A", "Team B"]);
+  assert.deepEqual(groups.map((group) => group.players.map((player) => player.name)), [
+    ["Admin", "Player 3"],
+    ["Player 2", "Player 4"],
+  ]);
+  assert.deepEqual(groups.map((group) => group.players.map((player) => player.colorName)), [
+    ["Black", "Yellow"],
+    ["Red", "Blue"],
+  ]);
+});
+
+test("teamDisplayGroups describes 6-player pairs", () => {
+  const groups = teamDisplayGroups({
+    mode: MODES.PAIRS,
+    playerNames: ["Admin", "Player 2", "Player 3", "Player 4", "Player 5", "Player 6"],
+  });
+
+  assert.deepEqual(groups.map((group) => group.players.map((player) => player.name)), [
+    ["Admin", "Player 4"],
+    ["Player 2", "Player 5"],
+    ["Player 3", "Player 6"],
+  ]);
+  assert.deepEqual(groups.map((group) => group.players.map((player) => player.colorName)), [
+    ["Black", "Blue"],
+    ["Red", "White"],
+    ["Yellow", "Green"],
+  ]);
+});
+
+test("teamDisplayGroups describes 6-player triads", () => {
+  const groups = teamDisplayGroups({
+    mode: MODES.TRIADS,
+    playerNames: ["Admin", "Player 2", "Player 3", "Player 4", "Player 5", "Player 6"],
+  });
+
+  assert.deepEqual(groups.map((group) => group.players.map((player) => player.name)), [
+    ["Admin", "Player 3", "Player 5"],
+    ["Player 2", "Player 4", "Player 6"],
+  ]);
+  assert.deepEqual(groups.map((group) => group.players.map((player) => player.colorName)), [
+    ["Black", "Yellow", "White"],
+    ["Red", "Blue", "Green"],
+  ]);
 });
 
 test("assignSeats — unsupported player count throws", () => {
