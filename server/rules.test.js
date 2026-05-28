@@ -223,7 +223,7 @@ test("backward-3 rule: eligibility and execution on rolling 3 immediately after 
   assert.equal(state.currentPlayer, 1, "turn should advance to Blue");
 });
 
-test("backward-3 rule: not allowed after leaving home with a 6", () => {
+test("backward-3 rule: eligibility after leaving home with a 6", () => {
   const state = createInitialState({
     playerCount: 2,
     mode: MODES.SINGLE,
@@ -237,7 +237,8 @@ test("backward-3 rule: not allowed after leaving home with a 6", () => {
 
   const moves3 = rollAndCompute(state, 3);
   const backwardMove = moves3.find((m) => m.label.includes("backward to gateway"));
-  assert.equal(backwardMove, undefined, "6 out followed by 3 should not allow backward move");
+  assert.ok(backwardMove, "6 out followed by 3 should allow backward move");
+  assert.equal(backwardMove.targetProgress, 81);
 });
 
 test("backward-3 rule: blocked when own marble is at progress 83, 82, or 81", () => {
