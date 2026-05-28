@@ -712,7 +712,7 @@ function buildRulesDemo(kind) {
       pointForMarbleState(state, 0, PLACE.TRACK, 0, null, 0, viewerSeat),
       pointForMarbleState(state, 0, PLACE.FINISH, null, 0, 0, viewerSeat),
     ];
-    label = "After leaving home with 1, Black marble 1 moves backward toward the gate on a 3";
+    label = "After leaving home with 1 or 6, Black marble 1 moves backward toward the gate on a 3";
   }
 
   return {

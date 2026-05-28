@@ -13,6 +13,8 @@ Then open `http://localhost:3000` in your browser. The admin clicks **Create new
 
 Set `PORT=8080 npm start` if port 3000 is taken.
 
+Agent-run browser simulations and multiplayer smoke tests should follow `AGENTS.md`; it contains the port-safety rules and the quick six-player setup path.
+
 ## Run tests
 
 ```bash
