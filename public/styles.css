@@ -1345,6 +1345,61 @@ input::placeholder {
   background: #a93232;
 }
 
+.audio-toggle-button {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(20, 32, 56, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f7f9fc;
+  cursor: pointer;
+  z-index: 90;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28);
+  transition: background 0.2s, transform 0.1s;
+}
+
+/* Music sits in the corner; sound effects to its left. */
+.music-toggle-button {
+  right: max(12px, env(safe-area-inset-right));
+}
+
+.sound-toggle-button {
+  right: calc(max(12px, env(safe-area-inset-right)) + 46px);
+}
+
+.audio-toggle-button:hover {
+  background: rgba(34, 50, 82, 0.96);
+}
+
+.audio-toggle-button:active {
+  transform: scale(0.94);
+}
+
+.audio-toggle-button[hidden] {
+  display: none !important;
+}
+
+/* Muted/off: hide the icon's "active" detail, show the diagonal slash. */
+.audio-toggle-button .slash {
+  display: none;
+}
+
+.audio-toggle-button.is-muted {
+  color: #c0c6d4;
+}
+
+.audio-toggle-button.is-muted .wave {
+  display: none;
+}
+
+.audio-toggle-button.is-muted .slash {
+  display: block;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
