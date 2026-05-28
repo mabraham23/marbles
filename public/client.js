@@ -10,8 +10,6 @@ import {
   createInitialState,
   modeLabel,
   PLACE,
-  centerOccupant,
-  marbleAtTrack,
   marbleToken,
   playerDone,
 } from "./shared/rules.js";
@@ -1072,23 +1070,15 @@ function moveTargetPoint(state, move, viewerSeat) {
   );
 }
 
-function moveTargetOccupant(state, move) {
-  const marble = state.marbles[move.marbleIdx];
-  if (move.targetPlace === PLACE.TRACK) {
-    const targetAbs = (state.starts[marble.player] + move.targetProgress) % TRACK_LEN;
-    const occupant = marbleAtTrack(state, targetAbs);
-    return occupant && occupant.player !== marble.player ? occupant : null;
-  }
-  if (move.targetPlace === PLACE.CENTER) {
-    const occupant = centerOccupant(state);
-    return occupant && occupant.player !== marble.player ? occupant : null;
-  }
-  return null;
-}
-
+// Bump classification is computed server-side and carried on `move.bump`
+// (null | { occupantIdx, token, isTeammate }). The client just renders it,
+// so there's a single source of truth for what gets bumped.
 function moveAccessibleLabel(state, move) {
-  const occupant = moveTargetOccupant(state, move);
-  return occupant ? `${move.label}, bumps ${marbleToken(occupant)} home` : move.label;
+  const bump = move.bump;
+  if (!bump) return move.label;
+  return bump.isTeammate
+    ? `${move.label}, warning: bumps teammate ${bump.token} home`
+    : `${move.label}, captures ${bump.token}`;
 }
 
 function moveChipLabel(state, move) {
@@ -1155,11 +1145,15 @@ function chipOffset(index, count) {
   return { x: start + index * spread, y: -23 };
 }
 
-function makeMoveChoiceChip(state, entry, x, y, isCapture, hitRadius) {
+function makeMoveChoiceChip(state, entry, x, y, hitRadius) {
   const marble = state.marbles[entry.move.marbleIdx];
   const labelText = moveAccessibleLabel(state, entry.move);
+  const bump = entry.move.bump;
+  // Opponent bumps reuse the existing golden `capture` style; teammate bumps
+  // get a distinct warning style.
+  const bumpClass = bump ? (bump.isTeammate ? " teammate-bump" : " capture") : "";
   const group = svgEl("g", {
-    class: `move-choice${isCapture ? " capture" : ""}`,
+    class: `move-choice${bumpClass}`,
     role: "button",
     tabindex: "0",
     "aria-label": labelText,
@@ -1197,9 +1191,10 @@ function renderMoveHints(isMyTurn) {
   });
 
   groupedMoveTargets(state, ui.pendingMoves, viewerSeat).forEach((target) => {
-    const hasCapture = target.entries.some((entry) => moveTargetOccupant(state, entry.move));
+    const hasOpponentBump = target.entries.some((entry) => entry.move.bump && !entry.move.bump.isTeammate);
+    const hasTeammateBump = target.entries.some((entry) => entry.move.bump && entry.move.bump.isTeammate);
     moveHintLayer.append(svgEl("circle", {
-      class: `move-target-ring${hasCapture ? " capture" : ""}${target.entries.length > 1 ? " multi" : ""}`,
+      class: `move-target-ring${hasOpponentBump ? " capture" : ""}${hasTeammateBump ? " teammate-bump" : ""}${target.entries.length > 1 ? " multi" : ""}`,
       cx: target.point.x,
       cy: target.point.y,
       r: 18,
@@ -1213,7 +1208,6 @@ function renderMoveHints(isMyTurn) {
         entry,
         target.point.x + offset.x,
         target.point.y + offset.y,
-        Boolean(moveTargetOccupant(state, entry.move)),
         hitRadius,
       ));
     });
@@ -1274,6 +1268,7 @@ function renderGame() {
     ui.pendingMoves.forEach((m, idx) => {
       const b = document.createElement("button");
       b.className = "move-button";
+      if (m.bump) b.classList.add(m.bump.isTeammate ? "teammate-bump" : "opponent-bump");
       b.type = "button";
       b.textContent = moveDisplayLabel(state, m);
       b.addEventListener("click", () => submitPendingMove(idx));

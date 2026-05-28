@@ -146,6 +146,39 @@ export function centerOccupant(state) {
   return state.marbles.find((marble) => marble.place === PLACE.CENTER);
 }
 
+// Returns the marble that `move` would bump home (any occupant whose owner
+// differs from the mover), or null. Covers track and center landings. In team
+// modes a teammate is a different player, so they appear here too.
+export function moveTargetOccupant(state, move) {
+  const marble = state.marbles[move.marbleIdx];
+  if (move.targetPlace === PLACE.TRACK) {
+    const targetAbs = (startForPlayer(state, marble.player) + move.targetProgress) % TRACK_LEN;
+    const occupant = marbleAtTrack(state, targetAbs);
+    return occupant && occupant.player !== marble.player ? occupant : null;
+  }
+  if (move.targetPlace === PLACE.CENTER) {
+    const occupant = centerOccupant(state);
+    return occupant && occupant.player !== marble.player ? occupant : null;
+  }
+  return null;
+}
+
+// null when no bump; otherwise { occupantIdx, token, isTeammate }. In single
+// mode teamId is null for everyone, so every bump is an opponent bump.
+export function bumpInfoForMove(state, move) {
+  const occupant = moveTargetOccupant(state, move);
+  if (!occupant) return null;
+  const mover = state.marbles[move.marbleIdx];
+  const moverTeam = teamId(state, mover.player);
+  const occupantTeam = teamId(state, occupant.player);
+  const isTeammate = moverTeam !== null && moverTeam === occupantTeam;
+  return {
+    occupantIdx: state.marbles.indexOf(occupant),
+    token: marbleToken(occupant),
+    isTeammate,
+  };
+}
+
 export function ownTrackProgresses(state, player) {
   return new Set(
     state.marbles
@@ -353,6 +386,80 @@ export function legalMoves(state, player, roll) {
   return moves;
 }
 
+// Move-ranking weights. Category bases are spaced so a tier's base gap exceeds
+// its within-tier refinement range (forward progress ≤ MAX_TRACK_PROGRESS; bump
+// distance ≤ OPPONENT_BUMP_PER_PROGRESS * MAX_TRACK_PROGRESS). That keeps the
+// confirmed priority order intact — refinements only reorder moves inside a
+// single category, never across categories.
+export const MOVE_SCORE_WEIGHTS = {
+  WIN: 1_000_000,             // a move that wins the game (single or team), added on top
+  FINISH: 6000,               // + targetFinish
+  OPPONENT_BUMP: 5000,        // + OPPONENT_BUMP_PER_PROGRESS * bumpedProgress
+  OPPONENT_BUMP_PER_PROGRESS: 5,
+  FORWARD: 4000,              // + resultingProgress (≤82; corner-6=4075 > corner-1=4005)
+  LEAVE_HOME: 3000,
+  TAKE_CENTER: 2000,
+  TEAMMATE_BUMP: -1_000_000,  // always last
+};
+
+// How far along a move lands, used as the within-tier refinement. Finish slots
+// rank above any track spot; center maps to its track progress.
+function resultingProgress(move) {
+  if (move.targetPlace === PLACE.FINISH) return MAX_TRACK_PROGRESS + 1 + (move.targetFinish ?? 0);
+  if (move.targetPlace === PLACE.CENTER) return CENTER_PROGRESS;
+  return move.targetProgress ?? 0;
+}
+
+function isLeaveHomeMove(state, move) {
+  const marble = state.marbles[move.marbleIdx];
+  return marble.place === PLACE.HOME && move.targetPlace === PLACE.TRACK;
+}
+
+// Higher = better. Exactly one category is assigned by precedence (a bump is
+// checked before the destination type, since leaving home onto an occupied
+// start square also bumps), then a winning move trumps everything.
+export function scoreMove(state, move, roll) {
+  const W = MOVE_SCORE_WEIGHTS;
+  const bump = bumpInfoForMove(state, move);
+  let score;
+
+  if (bump && bump.isTeammate) {
+    score = W.TEAMMATE_BUMP;
+  } else if (bump) {
+    const bumpedProgress = state.marbles[bump.occupantIdx].progress ?? 0;
+    score = W.OPPONENT_BUMP + W.OPPONENT_BUMP_PER_PROGRESS * bumpedProgress;
+  } else if (move.targetPlace === PLACE.FINISH) {
+    score = W.FINISH + (move.targetFinish ?? 0);
+  } else if (isLeaveHomeMove(state, move)) {
+    score = W.LEAVE_HOME;
+  } else if (move.targetPlace === PLACE.CENTER) {
+    score = W.TAKE_CENTER;
+  } else {
+    score = W.FORWARD + resultingProgress(move);
+  }
+
+  // applyMove mutates and advances the turn, so score against a throwaway clone.
+  const clone = structuredClone(state);
+  applyMove(clone, move, roll);
+  if (getWinner(clone)) score += W.WIN;
+
+  return score;
+}
+
+// Returns a new array of move objects, best→worst, each annotated with a `bump`
+// field (null | { occupantIdx, token, isTeammate }) for the client to render.
+// Stable: ties keep their original relative order for deterministic output.
+export function rankMoves(state, moves, roll) {
+  const decorated = moves.map((move, originalIndex) => ({
+    move,
+    originalIndex,
+    score: scoreMove(state, move, roll),
+    bump: bumpInfoForMove(state, move),
+  }));
+  decorated.sort((a, b) => (b.score - a.score) || (a.originalIndex - b.originalIndex));
+  return decorated.map(({ move, bump }) => ({ ...move, bump }));
+}
+
 function sendHome(marble) {
   marble.place = PLACE.HOME;
   marble.progress = null;
@@ -550,7 +657,7 @@ export function rollAndCompute(state, dieValue) {
   state.pendingDieValue = dieValue;
   state.pendingRoll = dieValue;
   state.noMoveRoll = null;
-  const moves = legalMoves(state, state.currentPlayer, dieValue);
+  const moves = rankMoves(state, legalMoves(state, state.currentPlayer, dieValue), dieValue);
   if (moves.length === 0) {
     state.log.unshift(
       `${state.playerNames[state.currentPlayer]} rolled ${dieValue}: no move`,
