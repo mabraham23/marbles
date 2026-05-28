@@ -56,6 +56,21 @@ function ensureContext() {
   musicGain = ctx.createGain();
   musicGain.gain.value = 0; // ramped up on first start (fade-in)
   musicGain.connect(ctx.destination);
+  // Recover from OS interruptions: when the context resumes, restart music if
+  // it should be playing; when it drops, halt the scheduler so it can't fall
+  // behind (it restarts on resume or the next user gesture).
+  ctx.onstatechange = () => {
+    if (!ctx) return;
+    if (ctx.state === "running") {
+      if (!musicMuted && !musicRunning) startMusic();
+    } else if (musicRunning) {
+      musicRunning = false;
+      if (musicTimer) {
+        clearTimeout(musicTimer);
+        musicTimer = null;
+      }
+    }
+  };
   return ctx;
 }
 
@@ -147,8 +162,22 @@ const EFFECTS = {
     tone({ freq: 1047, type: "sine", dur: 0.5, gain: 0.2, when: notes.length * 0.13 });
   },
   roll() {
-    noiseBurst({ dur: 0.16, gain: 0.18, filterFreq: 2600 });
-    tone({ freq: 420, type: "triangle", dur: 0.12, gain: 0.14, slideTo: 260, when: 0.14 });
+    // Soft tumbling rattle: several short, gentle ticks with slightly random
+    // timing/pitch/level, like dice bouncing — kept mellow (low filter) so it
+    // doesn't read as a harsh clap.
+    let t = 0;
+    const ticks = 5;
+    for (let i = 0; i < ticks; i += 1) {
+      noiseBurst({
+        dur: 0.045,
+        gain: 0.05 + Math.random() * 0.04,
+        filterFreq: 600 + Math.random() * 600,
+        when: t,
+      });
+      t += 0.045 + Math.random() * 0.05;
+    }
+    // Faint, satisfying low thud as the die settles on the table.
+    tone({ freq: 150, type: "sine", dur: 0.18, gain: 0.11, slideTo: 100, when: t + 0.02 });
   },
   noMove() {
     tone({ freq: 130, type: "sine", dur: 0.2, gain: 0.22, slideTo: 90 });
@@ -163,7 +192,15 @@ const EFFECTS = {
 // --- Public API -------------------------------------------------------------
 
 function play(name, { gainMul = 1 } = {}) {
-  if (muted || !ctx || ctx.state !== "running") return;
+  if (muted || !ctx) return;
+  // If the context got suspended/interrupted (iOS backgrounding, a call, etc.)
+  // try to recover it. This sound is skipped; on iOS the actual resume usually
+  // completes on the user's next gesture (see keepAudioAlive in client.js), so
+  // audio isn't left stuck silent.
+  if (ctx.state !== "running") {
+    ctx.resume().catch(() => {});
+    return;
+  }
   const fn = EFFECTS[name];
   if (!fn) return;
   // The primitives read fxGain synchronously while scheduling, so setting it
@@ -177,9 +214,10 @@ function play(name, { gainMul = 1 } = {}) {
 }
 
 // Resume/create the context from a user gesture. Safe to call repeatedly.
+// Resumes on any non-running state ("suspended" and iOS's "interrupted").
 function unlock() {
   const c = ensureContext();
-  if (c && c.state === "suspended") c.resume().catch(() => {});
+  if (c && c.state !== "running") c.resume().catch(() => {});
 }
 
 function toggleMuted() {
@@ -272,12 +310,14 @@ function startMusic() {
   }
   musicRunning = true;
   musicNextTime = ctx.currentTime + 0.1;
-  // Fade in on the first start; subsequent resumes snap to level.
+  // Fade in on the first start; on later resumes do a short 100ms ramp from the
+  // current level (stopMusic ramped it toward 0) so there's no click.
   const target = MUSIC_GAIN;
   const now = ctx.currentTime;
   musicGain.gain.cancelScheduledValues(now);
   if (musicFadedIn) {
-    musicGain.gain.setValueAtTime(target, now);
+    musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), now);
+    musicGain.gain.linearRampToValueAtTime(target, now + 0.1);
   } else {
     musicGain.gain.setValueAtTime(0.0001, now);
     musicGain.gain.linearRampToValueAtTime(target, now + MUSIC_FADE_S);
