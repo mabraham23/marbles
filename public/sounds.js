@@ -147,8 +147,22 @@ const EFFECTS = {
     tone({ freq: 1047, type: "sine", dur: 0.5, gain: 0.2, when: notes.length * 0.13 });
   },
   roll() {
-    noiseBurst({ dur: 0.16, gain: 0.18, filterFreq: 2600 });
-    tone({ freq: 420, type: "triangle", dur: 0.12, gain: 0.14, slideTo: 260, when: 0.14 });
+    // Soft tumbling rattle: several short, gentle ticks with slightly random
+    // timing/pitch/level, like dice bouncing — kept mellow (low filter) so it
+    // doesn't read as a harsh clap.
+    let t = 0;
+    const ticks = 5;
+    for (let i = 0; i < ticks; i += 1) {
+      noiseBurst({
+        dur: 0.045,
+        gain: 0.05 + Math.random() * 0.04,
+        filterFreq: 600 + Math.random() * 600,
+        when: t,
+      });
+      t += 0.045 + Math.random() * 0.05;
+    }
+    // Faint, satisfying low thud as the die settles on the table.
+    tone({ freq: 150, type: "sine", dur: 0.18, gain: 0.11, slideTo: 100, when: t + 0.02 });
   },
   noMove() {
     tone({ freq: 130, type: "sine", dur: 0.2, gain: 0.22, slideTo: 90 });

@@ -16,7 +16,7 @@ import {
   playerDone,
 } from "./shared/rules.js";
 
-import { Sound } from "./sounds.js?v=1";
+import { Sound } from "./sounds.js?v=2";
 
 import {
   renderBoardLayers,
