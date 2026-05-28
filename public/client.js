@@ -47,6 +47,7 @@ const CONNECTED_PILL_MS = 900;
 const OFFLINE_PILL_MS = 1200;
 const COPY_CONFIRM_MS = 1000;
 const NO_MOVE_NOTICE_MS = 1700;
+const NO_MOVE_NOTICE_DELAY_MS = 1000;
 const LOBBY_SYNC_MS = 5000;
 const CAPTURE_FLARE_MS = 1200;
 const TURN_TIME_LIMIT_OPTIONS = [0, 15, 30, 60];
@@ -218,6 +219,7 @@ let socket = null;
 let reconnectAttempt = 0;
 let pillFlashTimer = null;
 let noMoveNoticeTimer = null;
+let noMoveNoticeDelayTimer = null;
 let manuallyClosed = false;
 
 function setConnState(state) {
@@ -374,6 +376,8 @@ function handleServerMessage(msg) {
       if (state.noMoveRoll && state.noMoveRoll.rollId !== ui.lastProcessedNoMoveRollId) {
         ui.lastProcessedNoMoveRollId = state.noMoveRoll.rollId;
         flashNoMoveNotice(state.noMoveRoll);
+      } else if (!state.noMoveRoll) {
+        clearNoMoveNotice();
       }
       break;
     case "chatHistory":
@@ -1222,7 +1226,8 @@ function renderGame() {
   }
 
   // Dice
-  const canRoll = !state.gameOver && isMyTurn && state.pendingRoll == null;
+  const noMoveAdvancePending = Boolean(state.noMoveRoll?.shouldAdvance);
+  const canRoll = !state.gameOver && isMyTurn && state.pendingRoll == null && !noMoveAdvancePending;
   if (state.pendingDieValue == null && diceSpinTimer) {
     stopDiceRollAnimation(null);
   }
@@ -1554,25 +1559,45 @@ function ensureTurnNotice() {
 }
 
 function flashNoMoveNotice(noMoveRoll) {
+  if (noMoveNoticeDelayTimer) clearTimeout(noMoveNoticeDelayTimer);
   if (noMoveNoticeTimer) clearTimeout(noMoveNoticeTimer);
 
-  const seat = ui.game.seatColors[noMoveRoll.player];
-  const notice = ensureTurnNotice();
-  notice.style.setProperty("--player-color", PLAYER_COLORS[seat]);
-  notice.style.setProperty("--player-stroke", PLAYER_STROKES[seat]);
-  notice.style.setProperty("--player-ink", tokenLabelColor(seat));
-  notice.classList.add("no-move-turn-notice");
-  notice.textContent = `Rolled ${noMoveRoll.dieValue}: no valid moves`;
-  notice.hidden = false;
-  notice.classList.remove("turn-notice-pulse");
-  void notice.offsetWidth;
-  notice.classList.add("turn-notice-pulse");
+  noMoveNoticeDelayTimer = setTimeout(() => {
+    noMoveNoticeDelayTimer = null;
 
-  noMoveNoticeTimer = setTimeout(() => {
+    const seat = ui.game.seatColors[noMoveRoll.player];
+    const notice = ensureTurnNotice();
+    notice.style.setProperty("--player-color", PLAYER_COLORS[seat]);
+    notice.style.setProperty("--player-stroke", PLAYER_STROKES[seat]);
+    notice.style.setProperty("--player-ink", tokenLabelColor(seat));
+    notice.classList.add("no-move-turn-notice");
+    notice.textContent = `Rolled ${noMoveRoll.dieValue}: no valid moves`;
+    notice.hidden = false;
+    notice.classList.remove("turn-notice-pulse");
+    void notice.offsetWidth;
+    notice.classList.add("turn-notice-pulse");
+
+    noMoveNoticeTimer = setTimeout(() => {
+      noMoveNoticeTimer = null;
+      notice.hidden = true;
+      notice.classList.remove("turn-notice-pulse", "no-move-turn-notice");
+    }, noMoveRoll.noticeDurationMs ?? NO_MOVE_NOTICE_MS);
+  }, noMoveRoll.noticeDelayMs ?? NO_MOVE_NOTICE_DELAY_MS);
+}
+
+function clearNoMoveNotice() {
+  if (noMoveNoticeDelayTimer) {
+    clearTimeout(noMoveNoticeDelayTimer);
+    noMoveNoticeDelayTimer = null;
+  }
+  if (noMoveNoticeTimer) {
+    clearTimeout(noMoveNoticeTimer);
     noMoveNoticeTimer = null;
-    notice.hidden = true;
-    notice.classList.remove("turn-notice-pulse", "no-move-turn-notice");
-  }, NO_MOVE_NOTICE_MS);
+  }
+  if (turnNoticeEl) {
+    turnNoticeEl.hidden = true;
+    turnNoticeEl.classList.remove("turn-notice-pulse", "no-move-turn-notice");
+  }
 }
 
 // --- Roll button ---

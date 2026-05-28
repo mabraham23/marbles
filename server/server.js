@@ -24,6 +24,7 @@ import {
 import {
   DEFAULT_TURN_TIME_LIMIT_SECONDS,
   TURN_TIMEOUT_SWEEP_MS,
+  continueDelayedNoMoveRoll,
   continueTimedOutAutoPlay,
   normalizeTurnTimeLimit,
   rollForCurrentPlayer,
@@ -150,6 +151,7 @@ async function createRoom(opts = {}) {
     pendingMoves: null,
     pendingMovesFor: null,
     pendingMoveDeadlineAt: null,
+    noMoveAdvanceAt: null,
     timedOutAutoPlayer: null,
     turnTimeLimitSeconds: DEFAULT_TURN_TIME_LIMIT_SECONDS,
     entryFee: opts.entryFee ?? null,
@@ -478,6 +480,7 @@ async function handleStartGame(socket) {
   room.pendingMoves = null;
   room.pendingMovesFor = null;
   room.pendingMoveDeadlineAt = null;
+  room.noMoveAdvanceAt = null;
   room.timedOutAutoPlayer = null;
   room.settlement = null;
   room.lastMoveAt = Date.now();
@@ -512,6 +515,7 @@ async function handleResetGame(socket) {
   room.pendingMoves = null;
   room.pendingMovesFor = null;
   room.pendingMoveDeadlineAt = null;
+  room.noMoveAdvanceAt = null;
   room.timedOutAutoPlayer = null;
   room.settlement = null;
   room.lastMoveAt = Date.now();
@@ -535,6 +539,7 @@ async function handleEndGame(socket) {
   room.pendingMoves = null;
   room.pendingMovesFor = null;
   room.pendingMoveDeadlineAt = null;
+  room.noMoveAdvanceAt = null;
   room.timedOutAutoPlayer = null;
   // Keep room.settlement so an unsettled payout list survives back-to-lobby.
   // Cleared on the next startGame/resetGame.
@@ -555,6 +560,7 @@ async function handleRoll(socket) {
   const currentName = state.playerNames[state.currentPlayer];
   if (currentName !== name) return sendError(socket, "Not your turn");
   if (state.pendingRoll != null) return sendError(socket, "Already rolled");
+  if (state.noMoveRoll?.shouldAdvance) return sendError(socket, "No-move roll is resolving");
 
   rollForCurrentPlayer(room, rollDie(), Date.now());
 
@@ -836,6 +842,16 @@ setInterval(async () => {
     const now = Date.now();
     const rooms = await roomStore.list();
     for (const room of rooms) {
+      const noMoveAdvanceDue = room.noMoveAdvanceAt && room.noMoveAdvanceAt <= now;
+      if (noMoveAdvanceDue) {
+        const result = continueDelayedNoMoveRoll(room, now);
+        if (result.changed) {
+          await roomStore.set(room.code, room);
+          await broadcastGame(room);
+        }
+        continue;
+      }
+
       const shouldContinueAuto = Boolean(room.timedOutAutoPlayer);
       const deadlineExpired =
         room.pendingMoveDeadlineAt &&

@@ -7,6 +7,7 @@ import {
   assignSeats,
   createInitialState,
   rollAndCompute,
+  advanceNoMoveRoll,
   applyMove,
   legalMoves,
   PLACE,
@@ -132,7 +133,7 @@ test("home entry rule: only the leftmost home marble may leave on 1 or 6", () =>
   assert.deepEqual(leavesHome.map((m) => state.marbles[m.marbleIdx].index), [2]);
 });
 
-test("smoke: roll 0 moves with non-reroll advances player", () => {
+test("smoke: roll 0 moves with non-reroll waits, then advances player", () => {
   const state = createInitialState({
     playerCount: 2,
     mode: MODES.SINGLE,
@@ -141,14 +142,17 @@ test("smoke: roll 0 moves with non-reroll advances player", () => {
   // 3 cannot get anyone out of home and there's nothing on the track.
   const moves = rollAndCompute(state, 3);
   assert.equal(moves.length, 0);
-  assert.equal(state.currentPlayer, 1, "non-reroll with no moves advances");
-  // Regression: when the turn advances, the previous player's roll must be
-  // cleared so the new player doesn't see it on their dice.
+  assert.equal(state.currentPlayer, 0, "roller stays current while no-move roll is shown");
   assert.equal(state.pendingRoll, null);
-  assert.equal(state.pendingDieValue, null);
+  assert.equal(state.pendingDieValue, 3);
+  assert.equal(state.noMoveRoll.shouldAdvance, true);
+
+  assert.equal(advanceNoMoveRoll(state, state.noMoveRoll.rollId), true);
+  assert.equal(state.currentPlayer, 1, "non-reroll with no moves advances after notice");
+  assert.equal(state.pendingDieValue, null, "next player should not see the previous die");
 });
 
-test("regression: stale pendingDieValue cleared after no-move turn pass", () => {
+test("regression: no-move die remains with roller, then clears after no-move turn pass", () => {
   // Scenario the user reported: with two players, Black rolls and has no
   // move; Blue's screen showed Black's die value as if Blue had already
   // rolled. After fix, Blue's view sees a clean dice state.
@@ -157,8 +161,11 @@ test("regression: stale pendingDieValue cleared after no-move turn pass", () => 
     mode: MODES.SINGLE,
     playerNames: ["Black", "Blue"],
   });
-  rollAndCompute(state, 3); // no-move + non-reroll → advances
-  assert.equal(state.currentPlayer, 1, "advanced to Blue");
+  rollAndCompute(state, 3); // no-move + non-reroll → waits before advancing
+  assert.equal(state.currentPlayer, 0, "Black stays current while the rolled die is shown");
+  assert.equal(state.pendingDieValue, 3, "Black should see the no-move die");
+  assert.equal(advanceNoMoveRoll(state, state.noMoveRoll.rollId), true);
+  assert.equal(state.currentPlayer, 1, "advanced to Blue after no-move notice");
   assert.equal(state.pendingDieValue, null, "Blue should not see Black's die");
   // Then a re-roll (1 or 6) with no moves should KEEP pendingDieValue so the
   // player can see what they rolled while taking another roll.
