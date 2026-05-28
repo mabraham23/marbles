@@ -15,6 +15,10 @@ import {
   MARBLES_PER_PLAYER,
   TRACK_LEN,
   playerDone,
+  rankMoves,
+  scoreMove,
+  bumpInfoForMove,
+  MOVE_SCORE_WEIGHTS,
 } from "../public/shared/rules.js";
 
 test("validModes by player count", () => {
@@ -491,4 +495,190 @@ test("finish entrance progress: normal forward traversal must reach progress 82"
   assert.ok(move1);
   assert.equal(move1.targetPlace, PLACE.FINISH);
   assert.equal(move1.targetFinish, 0);
+});
+
+// ---- Move ranking + bump surfacing ----
+
+// Absolute track index a marble of `player` reaches at `progress`.
+const absFor = (state, player, progress) => (state.starts[player] + progress) % TRACK_LEN;
+// Progress an occupant of `player` must sit at to occupy `targetAbs`.
+const occProgressForAbs = (state, player, targetAbs) =>
+  (((targetAbs - state.starts[player]) % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
+const playerMarbles = (state, player) => state.marbles.filter((m) => m.player === player);
+
+test("rankMoves: legalMoves stays unannotated/unsorted (pure layer untouched)", () => {
+  const state = createInitialState({ playerCount: 2, mode: MODES.SINGLE, playerNames: ["A", "B"] });
+  const lm = legalMoves(state, 0, 6);
+  assert.ok(lm.length > 0);
+  assert.equal("bump" in lm[0], false, "legalMoves must not annotate moves");
+});
+
+test("rankMoves: full-chain category order matches confirmed priority", () => {
+  // 4-player single. One roll (1) that surfaces finish, opponent-bump, forward,
+  // leave-home and take-center at once — the test that catches tier-crossing.
+  const state = createInitialState({ playerCount: 4, mode: MODES.SINGLE, playerNames: ["A", "B", "C", "D"] });
+  const p0 = playerMarbles(state, 0);
+  p0[0].place = PLACE.TRACK; p0[0].progress = 82;   // roll 1 -> enters finish (slot 0)
+  p0[1].place = PLACE.TRACK; p0[1].progress = 5;    // roll 1 -> take center + forward to 6 (+ corner jump)
+  // p0[2] stays HOME -> leave home (leftmost home marble)
+  p0[3].place = PLACE.TRACK; p0[3].progress = 30;   // roll 1 -> forward to 31, lands on opponent
+
+  const opp = playerMarbles(state, 2)[0];
+  opp.place = PLACE.TRACK;
+  opp.progress = occProgressForAbs(state, 2, absFor(state, 0, 31)); // sit where p0[3] lands
+
+  const ranked = rankMoves(state, legalMoves(state, 0, 1), 1);
+  const iFinish = ranked.findIndex((m) => m.targetPlace === PLACE.FINISH);
+  const iBump = ranked.findIndex((m) => m.bump && !m.bump.isTeammate);
+  const iForward = ranked.findIndex((m) => m.targetPlace === PLACE.TRACK && m.targetProgress === 6 && !m.bump);
+  const iLeave = ranked.findIndex((m) => m.label.includes("leaves home"));
+  const iCenter = ranked.findIndex((m) => m.targetPlace === PLACE.CENTER);
+
+  assert.ok([iFinish, iBump, iForward, iLeave, iCenter].every((i) => i >= 0), "all categories present");
+  assert.ok(iFinish < iBump, "finish ranks above opponent bump");
+  assert.ok(iBump < iForward, "opponent bump ranks above plain forward");
+  assert.ok(iForward < iLeave, "forward ranks above leave home");
+  assert.ok(iLeave < iCenter, "leave home ranks above take center");
+  assert.equal(ranked[iBump].bump.isTeammate, false);
+});
+
+test("rankMoves: corner 6 (closest to finish) ranks before corner 1", () => {
+  const state = createInitialState({ playerCount: 2, mode: MODES.SINGLE, playerNames: ["A", "B"] });
+  playerMarbles(state, 0)[0].place = PLACE.CENTER;
+  playerMarbles(state, 0)[0].progress = null;
+
+  const ranked = rankMoves(state, legalMoves(state, 0, 1), 1);
+  const c6 = ranked.findIndex((m) => m.targetPlace === PLACE.TRACK && m.targetProgress === 75);
+  const c1 = ranked.findIndex((m) => m.targetPlace === PLACE.TRACK && m.targetProgress === 5);
+  assert.ok(c6 >= 0 && c1 >= 0, "both corner exits present");
+  assert.ok(c6 < c1, "corner 6 ranks before corner 1");
+});
+
+test("rankMoves: a winning move ranks first with WIN-tier score", () => {
+  const state = createInitialState({ playerCount: 4, mode: MODES.SINGLE, playerNames: ["A", "B", "C", "D"] });
+  const p0 = playerMarbles(state, 0);
+  p0[1].place = PLACE.FINISH; p0[1].finish = 1; p0[1].progress = null;
+  p0[2].place = PLACE.FINISH; p0[2].finish = 2; p0[2].progress = null;
+  p0[3].place = PLACE.FINISH; p0[3].finish = 3; p0[3].progress = null;
+  p0[0].place = PLACE.TRACK; p0[0].progress = 82;   // roll 1 -> finish slot 0 -> all home -> win
+
+  const ranked = rankMoves(state, legalMoves(state, 0, 1), 1);
+  assert.ok(ranked.length >= 1);
+  assert.equal(ranked[0].targetPlace, PLACE.FINISH);
+  assert.ok(scoreMove(state, ranked[0], 1) >= MOVE_SCORE_WEIGHTS.WIN, "winning move scores at WIN tier");
+});
+
+test("rankMoves: bumping a more-advanced opponent scores higher", () => {
+  const state = createInitialState({ playerCount: 4, mode: MODES.SINGLE, playerNames: ["A", "B", "C", "D"] });
+  const p0 = playerMarbles(state, 0);
+  p0[0].place = PLACE.TRACK; p0[0].progress = 0;    // occupies start; roll 1 -> land progress 1
+  p0[1].place = PLACE.TRACK; p0[1].progress = 10;   // roll 1 -> land progress 11
+
+  playerMarbles(state, 1)[0].place = PLACE.TRACK;
+  playerMarbles(state, 1)[0].progress = occProgressForAbs(state, 1, absFor(state, 0, 1));   // opp at p0[0] landing
+  playerMarbles(state, 2)[0].place = PLACE.TRACK;
+  playerMarbles(state, 2)[0].progress = occProgressForAbs(state, 2, absFor(state, 0, 11));  // opp at p0[1] landing
+
+  const ranked = rankMoves(state, legalMoves(state, 0, 1), 1);
+  const bumps = ranked.filter((m) => m.bump && !m.bump.isTeammate);
+  assert.equal(bumps.length, 2, "two opponent bumps");
+  const progFirst = state.marbles[bumps[0].bump.occupantIdx].progress;
+  const progSecond = state.marbles[bumps[1].bump.occupantIdx].progress;
+  assert.ok(progFirst > progSecond, "the more-advanced opponent bump ranks first");
+});
+
+test("rankMoves: teammate bump is ranked last and flagged", () => {
+  // PAIRS -> teams [[0,2],[1,3]]; player 0 lands on teammate player 2.
+  const state = createInitialState({ playerCount: 4, mode: MODES.PAIRS, playerNames: ["A", "B", "C", "D"] });
+  const p0 = playerMarbles(state, 0);
+  p0[0].place = PLACE.TRACK; p0[0].progress = 0;    // roll 1 -> land on teammate
+  p0[1].place = PLACE.TRACK; p0[1].progress = 20;   // roll 1 -> plain forward
+
+  const mate = playerMarbles(state, 2)[0];
+  mate.place = PLACE.TRACK;
+  mate.progress = occProgressForAbs(state, 2, absFor(state, 0, 1));
+
+  const ranked = rankMoves(state, legalMoves(state, 0, 1), 1);
+  const last = ranked[ranked.length - 1];
+  assert.ok(last.bump, "last move is the bump");
+  assert.equal(last.bump.isTeammate, true, "teammate bump flagged");
+  assert.ok(!ranked[0].bump || !ranked[0].bump.isTeammate, "a non-teammate-bump move ranks above it");
+});
+
+test("bumpInfoForMove: single mode classifies every bump as opponent", () => {
+  const state = createInitialState({ playerCount: 4, mode: MODES.SINGLE, playerNames: ["A", "B", "C", "D"] });
+  playerMarbles(state, 0)[0].place = PLACE.TRACK;
+  playerMarbles(state, 0)[0].progress = 0;
+  const other = playerMarbles(state, 2)[0];
+  other.place = PLACE.TRACK;
+  other.progress = occProgressForAbs(state, 2, absFor(state, 0, 1));
+
+  const bumpMove = legalMoves(state, 0, 1).find((m) => bumpInfoForMove(state, m));
+  assert.ok(bumpMove, "a bump move exists");
+  assert.equal(bumpInfoForMove(state, bumpMove).isTeammate, false);
+});
+
+test("rankMoves: deterministic across repeated calls", () => {
+  const state = createInitialState({ playerCount: 4, mode: MODES.SINGLE, playerNames: ["A", "B", "C", "D"] });
+  const p0 = playerMarbles(state, 0);
+  p0[0].place = PLACE.TRACK; p0[0].progress = 82;
+  p0[1].place = PLACE.TRACK; p0[1].progress = 5;
+  p0[3].place = PLACE.TRACK; p0[3].progress = 30;
+
+  const a = rankMoves(state, legalMoves(state, 0, 1), 1);
+  const b = rankMoves(state, legalMoves(state, 0, 1), 1);
+  assert.deepEqual(a, b);
+});
+
+test("rankMoves: finished player's teammate moves are ranked (move sharing)", () => {
+  // PAIRS -> teams [[0,2],[1,3]]. Player 0 is fully finished, so on their turn
+  // they move teammate player 2's marbles. Ranking must still apply to those.
+  const state = createInitialState({ playerCount: 4, mode: MODES.PAIRS, playerNames: ["A", "B", "C", "D"] });
+  playerMarbles(state, 0).forEach((m, i) => {
+    m.place = PLACE.FINISH; m.finish = i; m.progress = null;
+  });
+  assert.ok(playerDone(state, 0));
+
+  const p2 = playerMarbles(state, 2);
+  p2[0].place = PLACE.TRACK; p2[0].progress = 82;   // roll 1 -> teammate marble enters finish
+  // p2[1..3] stay HOME -> leave home (lower-value)
+
+  const ranked = rankMoves(state, legalMoves(state, 0, 1), 1);
+  assert.ok(ranked.length >= 2, "teammate has a finish and a leave-home option");
+  assert.equal(ranked[0].targetPlace, PLACE.FINISH, "teammate finish entry ranks first");
+  assert.equal(state.marbles[ranked[0].marbleIdx].player, 2, "the ranked move is a teammate's marble");
+  const iLeave = ranked.findIndex((m) => m.label.includes("leaves home"));
+  assert.ok(iLeave > 0, "teammate leave-home ranks below the finish entry");
+});
+
+test("rankMoves: bump annotation survives JSON serialization (WS round-trip)", () => {
+  const state = createInitialState({ playerCount: 4, mode: MODES.SINGLE, playerNames: ["A", "B", "C", "D"] });
+  playerMarbles(state, 0)[0].place = PLACE.TRACK;
+  playerMarbles(state, 0)[0].progress = 0;
+  const opp = playerMarbles(state, 2)[0];
+  opp.place = PLACE.TRACK;
+  opp.progress = occProgressForAbs(state, 2, absFor(state, 0, 1));
+
+  const ranked = rankMoves(state, legalMoves(state, 0, 1), 1);
+  const overWire = JSON.parse(JSON.stringify(ranked)); // mirrors broadcast -> client
+  assert.deepEqual(overWire, ranked, "move.bump is plain JSON and survives the wire");
+  const bumpMove = overWire.find((m) => m.bump);
+  assert.ok(bumpMove && bumpMove.bump.token && typeof bumpMove.bump.isTeammate === "boolean");
+});
+
+test("rollAndCompute returns moves in non-increasing score order", () => {
+  const state = createInitialState({ playerCount: 4, mode: MODES.SINGLE, playerNames: ["A", "B", "C", "D"] });
+  const p0 = playerMarbles(state, 0);
+  p0[0].place = PLACE.TRACK; p0[0].progress = 82;
+  p0[1].place = PLACE.TRACK; p0[1].progress = 5;
+  p0[3].place = PLACE.TRACK; p0[3].progress = 30;
+
+  const moves = rollAndCompute(state, 1);
+  assert.ok(moves.length > 1, "multiple moves to order");
+  for (let i = 1; i < moves.length; i += 1) {
+    assert.ok(
+      scoreMove(state, moves[i - 1], 1) >= scoreMove(state, moves[i], 1),
+      "moves are ranked best -> worst",
+    );
+  }
 });

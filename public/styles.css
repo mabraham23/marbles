@@ -564,6 +564,18 @@ input::placeholder {
   stroke: #ffdf7a;
 }
 
+/* Teammate bump: a warning the player is about to send their own teammate home. */
+.move-target-ring.teammate-bump {
+  fill: rgba(217, 54, 62, 0.2);
+  stroke: #ff7a59;
+  stroke-dasharray: 3 3;
+}
+
+.move-choice.teammate-bump .move-chip {
+  stroke: #ff7a59;
+  stroke-width: 3;
+}
+
 .move-choice:focus-visible .move-chip {
   stroke: #fffbe8;
   stroke-width: 3;
@@ -778,6 +790,23 @@ input::placeholder {
     0 8px 18px rgba(0, 0, 0, 0.22);
   text-align: left;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.28);
+}
+
+/* Opponent capture: golden accent matching the on-board capture style. */
+.move-button.opponent-bump {
+  outline: 2px solid #ffdf7a;
+  outline-offset: -2px;
+}
+
+/* Teammate bump: warning the player they'd send their own teammate home. */
+.move-button.teammate-bump {
+  outline: 2px dashed #ff7a59;
+  outline-offset: -2px;
+  opacity: 0.92;
+}
+
+.move-button.teammate-bump::before {
+  content: "⚠ ";
 }
 
 .moves-note {
