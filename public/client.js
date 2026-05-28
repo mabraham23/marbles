@@ -13,7 +13,10 @@ import {
   centerOccupant,
   marbleAtTrack,
   marbleToken,
+  playerDone,
 } from "./shared/rules.js";
+
+import { Sound } from "./sounds.js?v=1";
 
 import {
   renderBoardLayers,
@@ -88,6 +91,7 @@ const adminGameDetails = document.querySelector("#adminGameDetails");
 const adminGameActions = document.querySelector("#adminGameActions");
 
 const connPill = document.querySelector("#connPill");
+const soundToggleBtn = document.querySelector("#soundToggleBtn");
 const endedModal = document.querySelector("#endedModal");
 const endedHomeBtn = document.querySelector("#endedHomeBtn");
 const howToPlayButton = document.querySelector("#howToPlayButton");
@@ -164,6 +168,9 @@ function showView(name) {
     ui.unreadCount = 0;
     updateChatBadge();
   }
+
+  // Sound toggle is available in lobby and game.
+  if (soundToggleBtn) soundToggleBtn.hidden = !(name === "lobby" || name === "game");
 
   // Manage voice button visibility. Voice is available in lobby and game.
   const voiceToggleBtn = document.querySelector("#voiceToggleBtn");
@@ -332,6 +339,10 @@ function handleServerMessage(msg) {
       showView("name");
       break;
     case "joinedRoom":
+      // Re-baseline the lobby count: the next lobbyState is "the room as it is
+      // now", not a new arrival — so joining a room that already has people in
+      // it doesn't fire a spurious join ding.
+      sndPrevLobbyCount = null;
       ui.roomCode = msg.code;
       ui.myName = msg.name;
       ui.isAdmin = msg.isAdmin;
@@ -348,6 +359,12 @@ function handleServerMessage(msg) {
       }
       break;
     case "lobbyState":
+      // A new player appeared in the lobby (only after we've seen it once, so
+      // the initial snapshot of existing players doesn't trigger a sound).
+      if (sndPrevLobbyCount != null && msg.players && msg.players.length > sndPrevLobbyCount) {
+        Sound.play("join");
+      }
+      sndPrevLobbyCount = msg.players ? msg.players.length : sndPrevLobbyCount;
       ui.lobby = msg;
       ui.entryFee = msg.entryFee || null;
       ui.turnTimeLimitSeconds = msg.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
@@ -368,14 +385,17 @@ function handleServerMessage(msg) {
       ui.pendingMoveDeadlineAt = msg.pendingMoveDeadlineAt ?? null;
       ui.playerHandles = msg.playerHandles || {};
       ui.settlement = msg.settlement || null;
+      const wasLobby = ui.view === "lobby";
       if (ui.view !== "game") showView("game");
 
       renderGame();
       renderChat();
       updateTurnTimer();
+      playGameSounds(state, wasLobby);
       if (state.noMoveRoll && state.noMoveRoll.rollId !== ui.lastProcessedNoMoveRollId) {
         ui.lastProcessedNoMoveRollId = state.noMoveRoll.rollId;
         flashNoMoveNotice(state.noMoveRoll);
+        Sound.play("noMove");
       } else if (!state.noMoveRoll) {
         clearNoMoveNotice();
       }
@@ -1098,6 +1118,7 @@ function disablePendingMoveControls() {
 }
 
 function submitPendingMove(moveIdx) {
+  Sound.play("click");
   disablePendingMoveControls();
   send({ type: "submitMove", moveIdx });
 }
@@ -1517,6 +1538,91 @@ function showCaptureFlare(lastMove) {
   }, CAPTURE_FLARE_MS);
 }
 
+// --- Sound effect orchestration ---
+// Compares the incoming gameState against tracked baselines and plays one
+// sound per detected event. The first snapshot only seeds baselines (so a
+// mid-game rejoin never fires spurious roll/win/your-turn sounds).
+let sndPrevLobbyCount = null;
+let sndPrevDieValue = null;
+let sndPrevGameOver = false;
+let sndPrevWasMyTurn = false;
+let sndPrevDonePlayers = new Set();
+let sndLastMoveSig = null;
+let sndBaselineReady = false;
+
+function donePlayersSet(state) {
+  const out = new Set();
+  for (let p = 0; p < state.playerNames.length; p += 1) {
+    if (playerDone(state, p)) out.add(p);
+  }
+  return out;
+}
+
+function playGameSounds(state, wasLobby) {
+  const isMyTurn = state.currentPlayer === localPlayerIdx() && !state.gameOver;
+  let majorEventPlayed = false;
+
+  // Game begins: a real lobby->game transition (never a mid-game rejoin).
+  if (wasLobby) {
+    Sound.play("start");
+    majorEventPlayed = true;
+  }
+
+  if (!sndBaselineReady) {
+    // Seed baselines without firing diff-derived sounds.
+    sndBaselineReady = true;
+    sndPrevDieValue = state.pendingDieValue ?? null;
+    sndPrevGameOver = Boolean(state.gameOver);
+    sndPrevWasMyTurn = isMyTurn;
+    sndPrevDonePlayers = donePlayersSet(state);
+    sndLastMoveSig = state.lastMove ? JSON.stringify(state.lastMove) : null;
+    return;
+  }
+
+  // Dice roll: value transitions from none to 1..6.
+  const die = state.pendingDieValue ?? null;
+  if (die != null && sndPrevDieValue == null) Sound.play("roll");
+  sndPrevDieValue = die;
+
+  // One sound per move, by priority: capture > finish > leave-home > move.
+  if (state.lastMove) {
+    const sig = JSON.stringify(state.lastMove);
+    if (sig !== sndLastMoveSig) {
+      sndLastMoveSig = sig;
+      const lm = state.lastMove;
+      if (lm.bumpedIdx != null) Sound.play("capture");
+      else if (lm.after?.place === PLACE.FINISH) Sound.play("finish");
+      else if (lm.before?.place === PLACE.HOME && lm.after?.place === PLACE.TRACK) Sound.play("leaveHome");
+      else Sound.play("move");
+    }
+  }
+
+  // A player just got all their marbles home (distinct from the final win).
+  const done = donePlayersSet(state);
+  for (const p of done) {
+    if (!sndPrevDonePlayers.has(p)) {
+      Sound.play("playerDone");
+      majorEventPlayed = true;
+      break;
+    }
+  }
+  sndPrevDonePlayers = done;
+
+  // Win.
+  if (state.gameOver && !sndPrevGameOver) {
+    Sound.play("win");
+    majorEventPlayed = true;
+  }
+  sndPrevGameOver = Boolean(state.gameOver);
+
+  // Your-turn cue (local player only), suppressed if a bigger event just fired.
+  if (isMyTurn && !sndPrevWasMyTurn && !majorEventPlayed) {
+    Sound.play("yourTurn");
+    if (navigator.vibrate) navigator.vibrate(200);
+  }
+  sndPrevWasMyTurn = isMyTurn;
+}
+
 function setDiceFace(value) {
   rollButton.replaceChildren();
   const face = document.createElement("span");
@@ -1605,6 +1711,7 @@ $on(rollButton, "click", () => {
   if (!ui.game || ui.game.gameOver) return;
   if (ui.game.currentPlayer !== localPlayerIdx()) return;
   if (ui.game.pendingRoll != null || diceSpinTimer) return;
+  Sound.play("click");
   startDiceRollAnimation();
   send({ type: "roll" });
 });
@@ -1629,8 +1736,31 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && ui.view === "lobby") requestRoomSync();
 });
 
+// Browsers require a user gesture before audio can play. Resume the audio
+// context on the first interaction, then stop listening.
+function unlockAudioOnce() {
+  Sound.unlock();
+  window.removeEventListener("pointerdown", unlockAudioOnce);
+  window.removeEventListener("keydown", unlockAudioOnce);
+}
+window.addEventListener("pointerdown", unlockAudioOnce);
+window.addEventListener("keydown", unlockAudioOnce);
+
+function updateSoundToggle() {
+  if (!soundToggleBtn) return;
+  soundToggleBtn.classList.toggle("is-muted", Sound.muted);
+  soundToggleBtn.setAttribute("aria-label", Sound.muted ? "Unmute sound effects" : "Mute sound effects");
+}
+$on(soundToggleBtn, "click", () => {
+  Sound.unlock();
+  const nowMuted = Sound.toggleMuted();
+  updateSoundToggle();
+  if (!nowMuted) Sound.play("click"); // brief confirmation when turning sound on
+});
+
 // --- Init ---
 function init() {
+  updateSoundToggle();
   const params = new URLSearchParams(location.search);
   const room = params.get("room");
   if (room) {
