@@ -462,6 +462,18 @@ function nextPlayer(state) {
   state.pendingDieValue = null;
 }
 
+export function advanceNoMoveRoll(state, rollId = null) {
+  if (!state.noMoveRoll) return false;
+  if (rollId && state.noMoveRoll.rollId !== rollId) return false;
+
+  const shouldAdvance = state.noMoveRoll.shouldAdvance;
+  state.noMoveRoll = null;
+  state.pendingRoll = null;
+  state.pendingDieValue = null;
+  if (shouldAdvance) nextPlayer(state);
+  return true;
+}
+
 // Apply a move (mutates state). Returns metadata about what happened.
 // `move` is a move object returned by legalMoves. `roll` was the dice value.
 export function applyMove(state, move, roll) {
@@ -546,11 +558,11 @@ export function rollAndCompute(state, dieValue) {
     state.noMoveRoll = {
       player: state.currentPlayer,
       dieValue: dieValue,
+      shouldAdvance: dieValue !== 1 && dieValue !== 6,
       rollId: Math.random().toString(36).substring(2),
     };
     state.pendingRoll = null;
     state.pendingDieValue = dieValue;
-    if (dieValue !== 1 && dieValue !== 6) nextPlayer(state);
     state.lastMove = null;
   }
   return moves;

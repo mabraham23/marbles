@@ -1,6 +1,7 @@
 import {
   legalMoves,
   applyMove,
+  advanceNoMoveRoll,
   rollAndCompute,
   computeSettlement,
 } from "../public/shared/rules.js";
@@ -9,6 +10,8 @@ export const TURN_TIME_LIMIT_OPTIONS = [0, 15, 30, 60];
 export const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
 export const TURN_TIMEOUT_SWEEP_MS = 1000;
 export const AUTO_CHAIN_STEP_LIMIT = 40;
+export const NO_MOVE_DIE_DISPLAY_MS = 1000;
+export const NO_MOVE_NOTICE_MS = 2400;
 
 export function normalizeTurnTimeLimit(raw) {
   const seconds = Number(raw);
@@ -33,14 +36,43 @@ export function rollForCurrentPlayer(room, dieValue, now, opts = {}) {
     room.pendingMoves = moves;
     room.pendingMovesFor = currentName;
     room.pendingMoveDeadlineAt = opts.startDeadline === false ? null : deadlineForRoom(room, now);
+    room.noMoveAdvanceAt = null;
   } else {
     room.pendingMoves = null;
     room.pendingMovesFor = null;
     room.pendingMoveDeadlineAt = null;
+    if (state.noMoveRoll?.shouldAdvance) {
+      state.noMoveRoll.noticeDelayMs = NO_MOVE_DIE_DISPLAY_MS;
+      state.noMoveRoll.noticeDurationMs = NO_MOVE_NOTICE_MS;
+      room.noMoveAdvanceAt = now + NO_MOVE_DIE_DISPLAY_MS + NO_MOVE_NOTICE_MS;
+    } else {
+      room.noMoveAdvanceAt = null;
+    }
   }
   room.lastMoveAt = now;
   if (state.gameOver && !room.completedAt) room.completedAt = room.lastMoveAt;
   return moves;
+}
+
+export function continueDelayedNoMoveRoll(room, now) {
+  if (
+    room.phase !== "playing" ||
+    !room.gameState ||
+    !room.noMoveAdvanceAt ||
+    room.noMoveAdvanceAt > now
+  ) {
+    return { changed: false };
+  }
+
+  const rollId = room.gameState.noMoveRoll?.rollId ?? null;
+  const changed = advanceNoMoveRoll(room.gameState, rollId);
+  room.noMoveAdvanceAt = null;
+  room.pendingMoves = null;
+  room.pendingMovesFor = null;
+  room.pendingMoveDeadlineAt = null;
+  room.timedOutAutoPlayer = null;
+  if (changed) room.lastMoveAt = now;
+  return { changed };
 }
 
 export function submitPendingMoveForRoom(room, moveIdx, now) {
@@ -108,6 +140,10 @@ export function continueTimedOutAutoPlay(room, now, rollDie, opts = {}) {
     const currentName = state.playerNames[state.currentPlayer];
     if (!autoName || currentName !== autoName) {
       clearAutoState();
+      return { changed, capped: false };
+    }
+
+    if (state.noMoveRoll?.shouldAdvance) {
       return { changed, capped: false };
     }
 

@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import { createInitialState, PLACE } from "../public/shared/rules.js";
 import {
   DEFAULT_TURN_TIME_LIMIT_SECONDS,
+  NO_MOVE_DIE_DISPLAY_MS,
+  NO_MOVE_NOTICE_MS,
+  continueDelayedNoMoveRoll,
   continueTimedOutAutoPlay,
   normalizeTurnTimeLimit,
   rollForCurrentPlayer,
@@ -79,6 +82,32 @@ test("roll with no moves does not create deadline", () => {
 
   assert.equal(moves.length, 0);
   assert.equal(room.pendingMoveDeadlineAt, null);
+  assert.equal(room.noMoveAdvanceAt, 1_000 + NO_MOVE_DIE_DISPLAY_MS + NO_MOVE_NOTICE_MS);
+  assert.equal(room.gameState.currentPlayer, 0);
+  assert.equal(room.gameState.pendingDieValue, 2);
+});
+
+test("delayed no-move advance clears die and passes turn after notice window", () => {
+  const state = makeTwoPlayerState();
+  state.marbles
+    .filter((m) => m.player === 0)
+    .forEach((marble, idx) => {
+      marble.place = PLACE.FINISH;
+      marble.finish = idx;
+    });
+  const room = makeRoom(state, { turnTimeLimitSeconds: 15 });
+
+  rollForCurrentPlayer(room, 2, 1_000);
+  const early = continueDelayedNoMoveRoll(room, room.noMoveAdvanceAt - 1);
+  assert.equal(early.changed, false);
+  assert.equal(room.gameState.currentPlayer, 0);
+
+  const done = continueDelayedNoMoveRoll(room, room.noMoveAdvanceAt);
+  assert.equal(done.changed, true);
+  assert.equal(room.noMoveAdvanceAt, null);
+  assert.equal(room.gameState.currentPlayer, 1);
+  assert.equal(room.gameState.pendingDieValue, null);
+  assert.equal(room.gameState.noMoveRoll, null);
 });
 
 test("expired deadline submits first pending move", () => {
