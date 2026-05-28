@@ -56,6 +56,21 @@ function ensureContext() {
   musicGain = ctx.createGain();
   musicGain.gain.value = 0; // ramped up on first start (fade-in)
   musicGain.connect(ctx.destination);
+  // Recover from OS interruptions: when the context resumes, restart music if
+  // it should be playing; when it drops, halt the scheduler so it can't fall
+  // behind (it restarts on resume or the next user gesture).
+  ctx.onstatechange = () => {
+    if (!ctx) return;
+    if (ctx.state === "running") {
+      if (!musicMuted && !musicRunning) startMusic();
+    } else if (musicRunning) {
+      musicRunning = false;
+      if (musicTimer) {
+        clearTimeout(musicTimer);
+        musicTimer = null;
+      }
+    }
+  };
   return ctx;
 }
 
@@ -177,7 +192,15 @@ const EFFECTS = {
 // --- Public API -------------------------------------------------------------
 
 function play(name, { gainMul = 1 } = {}) {
-  if (muted || !ctx || ctx.state !== "running") return;
+  if (muted || !ctx) return;
+  // If the context got suspended/interrupted (iOS backgrounding, a call, etc.)
+  // try to recover it. This sound is skipped; on iOS the actual resume usually
+  // completes on the user's next gesture (see keepAudioAlive in client.js), so
+  // audio isn't left stuck silent.
+  if (ctx.state !== "running") {
+    ctx.resume().catch(() => {});
+    return;
+  }
   const fn = EFFECTS[name];
   if (!fn) return;
   // The primitives read fxGain synchronously while scheduling, so setting it
@@ -191,9 +214,10 @@ function play(name, { gainMul = 1 } = {}) {
 }
 
 // Resume/create the context from a user gesture. Safe to call repeatedly.
+// Resumes on any non-running state ("suspended" and iOS's "interrupted").
 function unlock() {
   const c = ensureContext();
-  if (c && c.state === "suspended") c.resume().catch(() => {});
+  if (c && c.state !== "running") c.resume().catch(() => {});
 }
 
 function toggleMuted() {
@@ -286,12 +310,14 @@ function startMusic() {
   }
   musicRunning = true;
   musicNextTime = ctx.currentTime + 0.1;
-  // Fade in on the first start; subsequent resumes snap to level.
+  // Fade in on the first start; on later resumes do a short 100ms ramp from the
+  // current level (stopMusic ramped it toward 0) so there's no click.
   const target = MUSIC_GAIN;
   const now = ctx.currentTime;
   musicGain.gain.cancelScheduledValues(now);
   if (musicFadedIn) {
-    musicGain.gain.setValueAtTime(target, now);
+    musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), now);
+    musicGain.gain.linearRampToValueAtTime(target, now + 0.1);
   } else {
     musicGain.gain.setValueAtTime(0.0001, now);
     musicGain.gain.linearRampToValueAtTime(target, now + MUSIC_FADE_S);

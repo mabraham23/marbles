@@ -16,7 +16,7 @@ import {
   playerDone,
 } from "./shared/rules.js";
 
-import { Sound } from "./sounds.js?v=2";
+import { Sound } from "./sounds.js?v=3";
 
 import {
   renderBoardLayers,
@@ -1736,25 +1736,29 @@ window.addEventListener("focus", () => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && ui.view === "lobby") requestRoomSync();
   // Pause background music in a backgrounded tab (setTimeout throttling would
-  // otherwise starve the scheduler) and resume it on return.
+  // otherwise starve the scheduler). On return, resume the context FIRST —
+  // unconditionally, so sound effects recover even when music is off — then
+  // re-arm music.
   if (document.hidden) {
     Sound.stopMusic();
   } else {
+    Sound.unlock();
     Sound.startMusic();
   }
 });
 
-// Browsers require a user gesture before audio can play. Resume the audio
-// context on the first interaction, start the background music, then stop
-// listening.
-function unlockAudioOnce() {
+// Keep audio alive. Browsers require a user gesture before audio can start, and
+// iOS additionally suspends/"interrupts" the context after backgrounding, calls,
+// or reloads — which would otherwise leave the toggle "on" but silent. So rather
+// than unlocking once, resume on EVERY user gesture (a no-op when already
+// running) and re-arm music. touchend is included for iOS reliability.
+function keepAudioAlive() {
   Sound.unlock();
   Sound.startMusic();
-  window.removeEventListener("pointerdown", unlockAudioOnce);
-  window.removeEventListener("keydown", unlockAudioOnce);
 }
-window.addEventListener("pointerdown", unlockAudioOnce);
-window.addEventListener("keydown", unlockAudioOnce);
+window.addEventListener("pointerdown", keepAudioAlive);
+window.addEventListener("keydown", keepAudioAlive);
+window.addEventListener("touchend", keepAudioAlive);
 
 function updateSoundToggle() {
   if (!soundToggleBtn) return;
