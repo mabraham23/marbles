@@ -354,6 +354,7 @@ function handleServerMessage(msg) {
       ui.settlement = null;
       if (ui.view !== "lobby") showView("lobby");
       renderLobby();
+      renderChat();
       updateLobbySyncTimer();
       break;
     case "gameState":
@@ -368,6 +369,7 @@ function handleServerMessage(msg) {
       if (ui.view !== "game") showView("game");
 
       renderGame();
+      renderChat();
       updateTurnTimer();
       if (state.noMoveRoll && state.noMoveRoll.rollId !== ui.lastProcessedNoMoveRollId) {
         ui.lastProcessedNoMoveRollId = state.noMoveRoll.rollId;
@@ -1649,16 +1651,23 @@ function handleChatHistory(chat) {
   }
 }
 
+function getChatSenderColorForSeat(seat) {
+  return seat === 0 ? tokenLabelColor(seat) : PLAYER_COLORS[seat];
+}
+
 function getColorForSender(senderName) {
   if (ui.game && ui.game.playerNames) {
     const pIdx = ui.game.playerNames.indexOf(senderName);
     if (pIdx >= 0 && ui.game.seatColors) {
       const seat = ui.game.seatColors[pIdx];
-      if (seat !== undefined) return PLAYER_COLORS[seat];
+      if (seat !== undefined) return getChatSenderColorForSeat(seat);
     }
   } else if (ui.lobby && ui.lobby.players) {
     const pIdx = ui.lobby.players.findIndex(p => p.name === senderName);
-    if (pIdx >= 0) return PLAYER_COLORS[pIdx % PLAYER_COLORS.length];
+    if (pIdx >= 0) {
+      const seat = pIdx % PLAYER_COLORS.length;
+      return getChatSenderColorForSeat(seat);
+    }
   }
   return "#c7b891"; // Default muted wood/gold color
 }
