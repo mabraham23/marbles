@@ -1345,10 +1345,9 @@ input::placeholder {
   background: #a93232;
 }
 
-.sound-toggle-button {
+.audio-toggle-button {
   position: fixed;
   top: max(10px, env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
   width: 38px;
   height: 38px;
   display: grid;
@@ -1363,32 +1362,41 @@ input::placeholder {
   transition: background 0.2s, transform 0.1s;
 }
 
-.sound-toggle-button:hover {
+/* Music sits in the corner; sound effects to its left. */
+.music-toggle-button {
+  right: max(12px, env(safe-area-inset-right));
+}
+
+.sound-toggle-button {
+  right: calc(max(12px, env(safe-area-inset-right)) + 46px);
+}
+
+.audio-toggle-button:hover {
   background: rgba(34, 50, 82, 0.96);
 }
 
-.sound-toggle-button:active {
+.audio-toggle-button:active {
   transform: scale(0.94);
 }
 
-.sound-toggle-button[hidden] {
+.audio-toggle-button[hidden] {
   display: none !important;
 }
 
-/* Muted: hide the sound waves, show the diagonal slash. */
-.sound-toggle-button .slash {
+/* Muted/off: hide the icon's "active" detail, show the diagonal slash. */
+.audio-toggle-button .slash {
   display: none;
 }
 
-.sound-toggle-button.is-muted {
+.audio-toggle-button.is-muted {
   color: #c0c6d4;
 }
 
-.sound-toggle-button.is-muted .wave {
+.audio-toggle-button.is-muted .wave {
   display: none;
 }
 
-.sound-toggle-button.is-muted .slash {
+.audio-toggle-button.is-muted .slash {
   display: block;
 }
 

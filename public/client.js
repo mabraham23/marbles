@@ -92,6 +92,7 @@ const adminGameActions = document.querySelector("#adminGameActions");
 
 const connPill = document.querySelector("#connPill");
 const soundToggleBtn = document.querySelector("#soundToggleBtn");
+const musicToggleBtn = document.querySelector("#musicToggleBtn");
 const endedModal = document.querySelector("#endedModal");
 const endedHomeBtn = document.querySelector("#endedHomeBtn");
 const howToPlayButton = document.querySelector("#howToPlayButton");
@@ -1734,12 +1735,21 @@ window.addEventListener("focus", () => {
 
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && ui.view === "lobby") requestRoomSync();
+  // Pause background music in a backgrounded tab (setTimeout throttling would
+  // otherwise starve the scheduler) and resume it on return.
+  if (document.hidden) {
+    Sound.stopMusic();
+  } else {
+    Sound.startMusic();
+  }
 });
 
 // Browsers require a user gesture before audio can play. Resume the audio
-// context on the first interaction, then stop listening.
+// context on the first interaction, start the background music, then stop
+// listening.
 function unlockAudioOnce() {
   Sound.unlock();
+  Sound.startMusic();
   window.removeEventListener("pointerdown", unlockAudioOnce);
   window.removeEventListener("keydown", unlockAudioOnce);
 }
@@ -1758,9 +1768,23 @@ $on(soundToggleBtn, "click", () => {
   if (!nowMuted) Sound.play("click"); // brief confirmation when turning sound on
 });
 
+function updateMusicToggle() {
+  if (!musicToggleBtn) return;
+  musicToggleBtn.classList.toggle("is-muted", Sound.musicMuted);
+  musicToggleBtn.setAttribute("aria-label", Sound.musicMuted ? "Turn music on" : "Turn music off");
+}
+$on(musicToggleBtn, "click", () => {
+  Sound.unlock();
+  Sound.toggleMusic();
+  updateMusicToggle();
+});
+
 // --- Init ---
 function init() {
   updateSoundToggle();
+  updateMusicToggle();
+  // Music plays app-wide, so its toggle is always available.
+  if (musicToggleBtn) musicToggleBtn.hidden = false;
   const params = new URLSearchParams(location.search);
   const room = params.get("room");
   if (room) {
