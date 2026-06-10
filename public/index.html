@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=20" />
+    <link rel="stylesheet" href="styles.css?v=21" />
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
@@ -183,9 +183,12 @@
       <!-- LOBBY VIEW -->
       <section id="lobbyView" class="card" hidden>
         <header class="lobby-header">
-          <div>
-            <h1 class="title">Lobby</h1>
-            <p class="subtitle">Code: <strong id="lobbyCodeLabel">—</strong></p>
+          <div class="lobby-header-row">
+            <div>
+              <h1 class="title">Lobby</h1>
+              <p class="subtitle">Code: <strong id="lobbyCodeLabel">—</strong></p>
+            </div>
+            <div id="lobbyAudioControls" class="header-audio-controls" aria-label="Audio controls"></div>
           </div>
           <button id="copyLinkBtn" class="secondary-button" type="button">Copy invite link</button>
         </header>
@@ -222,9 +225,12 @@
       <!-- TEAM STAGING VIEW -->
       <section id="teamStagingView" class="card team-staging" hidden>
         <header class="lobby-header">
-          <div>
-            <h1 class="title">Review Teams</h1>
-            <p class="subtitle">Code: <strong id="stagingCodeLabel">—</strong></p>
+          <div class="lobby-header-row">
+            <div>
+              <h1 class="title">Review Teams</h1>
+              <p class="subtitle">Code: <strong id="stagingCodeLabel">—</strong></p>
+            </div>
+            <div id="stagingAudioControls" class="header-audio-controls" aria-label="Audio controls"></div>
           </div>
           <button id="stagingBackBtn" class="secondary-button" type="button" hidden>Back to lobby</button>
         </header>
@@ -400,6 +406,6 @@
     <!-- Hidden container for per-peer remote audio elements -->
     <div id="voiceAudioContainer" hidden aria-hidden="true"></div>
 
-    <script type="module" src="client.js?v=22"></script>
+    <script type="module" src="client.js?v=23"></script>
   </body>
 </html>

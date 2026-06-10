@@ -655,7 +655,7 @@ export function applyMove(state, move, roll) {
 
   const bumpedText =
     bumpedIdx !== null ? `, bumped ${marbleToken(state.marbles[bumpedIdx])} home` : "";
-  state.log.unshift(`${move.label}${bumpedText}`);
+  state.log.unshift(`${move.label}${bumpedText} (rolled ${roll})`);
   state.pendingRoll = null;
   state.pendingDieValue = null;
 

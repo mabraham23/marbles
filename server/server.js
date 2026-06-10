@@ -24,6 +24,8 @@ import {
 } from "./room-lifecycle.js";
 import {
   DEFAULT_TURN_TIME_LIMIT_SECONDS,
+  NO_MOVE_DIE_DISPLAY_MS,
+  NO_MOVE_NOTICE_MS,
   TURN_TIMEOUT_SWEEP_MS,
   continueDelayedNoMoveRoll,
   continueTimedOutAutoPlay,
@@ -506,7 +508,7 @@ async function handleSetEntryFee(socket, msg) {
 function nextBotName(room) {
   const taken = new Set(room.players.map((p) => p.name));
   for (let i = 1; i <= 12; i += 1) {
-    const candidate = `Computer ${i}`;
+    const candidate = `CPU ${i}`;
     if (!taken.has(candidate)) return candidate;
   }
   return null;
@@ -709,9 +711,12 @@ async function handleSubmitMove(socket, msg) {
     return sendError(socket, "No pending move for you");
   }
   const moveIdx = Number(msg.moveIdx);
-  const submitted = submitPendingMoveForRoom(room, moveIdx, Date.now());
+  const now = Date.now();
+  const submitted = submitPendingMoveForRoom(room, moveIdx, now);
   if (!submitted.ok) return sendError(socket, submitted.error);
   room.timedOutAutoPlayer = null;
+  // Give this move's animation time to land before a following bot acts.
+  room.botNextActAt = now + BOT_STEP_DELAY_MS;
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -974,8 +979,13 @@ heartbeatTimer.unref();
 wss.on("close", () => clearInterval(heartbeatTimer));
 
 // Drive a computer player's turn by one action (roll, or play the best-ranked
-// move). One action per sweep tick keeps bot play watchable. pendingMoves are
-// already ranked best-first by the shared heuristic, so index 0 is the choice.
+// move). pendingMoves are already ranked best-first by the shared heuristic,
+// so index 0 is the choice. Actions are paced by botNextActAt so spectators
+// can read each roll before the marble moves, and watch the move animation
+// finish before the next die value appears — otherwise reroll chains look
+// like illegal moves (e.g. "left home on a 5" when the 5 was the next roll).
+const BOT_STEP_DELAY_MS = 1200;
+
 function isBotName(room, name) {
   return room.players.some((p) => p.isBot && p.name === name);
 }
@@ -988,13 +998,20 @@ function driveBotTurn(room, now) {
   if (!isBotName(room, currentName)) return { changed: false };
   // A no-move notice is resolving on its own timer — wait for it.
   if (state.noMoveRoll?.shouldAdvance) return { changed: false };
+  if (room.botNextActAt && room.botNextActAt > now) return { changed: false };
 
   if (room.pendingMoves && room.pendingMovesFor === currentName && room.pendingMoves.length > 0) {
     const submitted = submitPendingMoveForRoom(room, 0, now);
+    if (submitted.ok) room.botNextActAt = now + BOT_STEP_DELAY_MS;
     return { changed: submitted.ok };
   }
   if (state.pendingRoll == null) {
     rollForCurrentPlayer(room, rollDie(), now, { startDeadline: false });
+    // A 1/6 that can't move re-rolls on its own turn; hold long enough for
+    // the "no valid moves" notice to play out before the next die appears.
+    room.botNextActAt = state.noMoveRoll && !state.noMoveRoll.shouldAdvance
+      ? now + NO_MOVE_DIE_DISPLAY_MS + NO_MOVE_NOTICE_MS
+      : now + BOT_STEP_DELAY_MS;
     return { changed: true };
   }
   return { changed: false };

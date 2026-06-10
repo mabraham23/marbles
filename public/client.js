@@ -110,6 +110,9 @@ const adminGameActions = document.querySelector("#adminGameActions");
 const connPill = document.querySelector("#connPill");
 const soundToggleBtn = document.querySelector("#soundToggleBtn");
 const musicToggleBtn = document.querySelector("#musicToggleBtn");
+const gameAudioControls = document.querySelector("#gameAudioControls");
+const lobbyAudioControls = document.querySelector("#lobbyAudioControls");
+const stagingAudioControls = document.querySelector("#stagingAudioControls");
 const endedModal = document.querySelector("#endedModal");
 const endedHomeBtn = document.querySelector("#endedHomeBtn");
 const howToPlayButton = document.querySelector("#howToPlayButton");
@@ -197,11 +200,18 @@ function showView(name) {
     updateChatBadge();
   }
 
-  // Audio toggles float fixed in the top-right corner on every room view, so
-  // sound/music sit in one consistent spot (mirroring the bottom-right chat/
-  // voice FABs). Re-parent to <body> so they aren't trapped in a hidden view.
-  if (soundToggleBtn && soundToggleBtn.parentElement !== document.body) document.body.append(soundToggleBtn);
-  if (musicToggleBtn && musicToggleBtn.parentElement !== document.body) document.body.append(musicToggleBtn);
+  // Audio toggles live in an in-flow slot at the top right of each room view
+  // (game top bar, lobby/staging header) rather than floating fixed over the
+  // page, so they can never cover overlay controls like the chat drawer's
+  // close button or the rules modal's close button.
+  const audioSlot =
+    name === "game" ? gameAudioControls
+    : name === "lobby" ? lobbyAudioControls
+    : name === "staging" ? stagingAudioControls
+    : null;
+  if (audioSlot && soundToggleBtn && musicToggleBtn && soundToggleBtn.parentElement !== audioSlot) {
+    audioSlot.append(soundToggleBtn, musicToggleBtn);
+  }
   if (soundToggleBtn) soundToggleBtn.hidden = !roomView;
   if (musicToggleBtn) musicToggleBtn.hidden = !roomView;
 
@@ -348,12 +358,17 @@ function requestRoomSync() {
   socket.send(JSON.stringify({ type: "syncRoom" }));
 }
 
+// Periodic room resync on every room view (lobby, staging, game). The server
+// pushes every change, but if a single broadcast is missed (flaky mobile
+// connection, backgrounded tab) this self-heals instead of leaving the UI
+// frozen on stale state — e.g. "Waiting for X to roll" after X already moved.
 function updateLobbySyncTimer() {
   if (lobbySyncTimer) {
     clearInterval(lobbySyncTimer);
     lobbySyncTimer = null;
   }
-  if ((ui.view !== "lobby" && ui.view !== "staging") || !ui.roomCode || !ui.myName) return;
+  const roomView = ui.view === "lobby" || ui.view === "staging" || ui.view === "game";
+  if (!roomView || !ui.roomCode || !ui.myName) return;
   lobbySyncTimer = setInterval(requestRoomSync, LOBBY_SYNC_MS);
 }
 
@@ -1169,7 +1184,7 @@ function renderLobby() {
       if (p.isBot) li.classList.add("is-bot");
       const adminTag = p.name === adminName ? '<span class="tag">admin</span>' : "";
       const youTag = p.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
-      const botTag = p.isBot ? '<span class="tag tag-bot">computer</span>' : "";
+      const botTag = p.isBot ? '<span class="tag tag-bot">CPU</span>' : "";
       const handle = ui.playerHandles?.[p.name]?.venmo || null;
       let handleTag = "";
       if (ui.entryFee && !p.isBot) {
@@ -1466,7 +1481,12 @@ function renderGame() {
       dieValueEl.textContent = `Rolled ${state.pendingDieValue}`;
     }
   } else if (!diceSpinTimer) {
-    setDiceFace(null);
+    // Keep the just-played roll on the die while its move animates and until
+    // the next roll happens, so spectators can match each move to its roll
+    // (bots especially — their roll and move arrive in separate updates).
+    // Once the local player may roll, reset to the ready face.
+    const lingerRoll = !canRoll && !state.gameOver ? state.lastMove?.roll ?? null : null;
+    setDiceFace(lingerRoll);
     if (state.gameOver) {
       dieValueEl.textContent = `${state.winner} wins!`;
     } else if (canRoll) {
@@ -1946,7 +1966,8 @@ function ensureTurnNotice() {
   turnNoticeEl = document.createElement("div");
   turnNoticeEl.className = "current-player turn-notice";
   turnNoticeEl.hidden = true;
-  turnPanel.append(turnNoticeEl);
+  // Centered over the board like the capture flare / win overlay.
+  document.querySelector(".board-card")?.append(turnNoticeEl);
   return turnNoticeEl;
 }
 
@@ -2026,11 +2047,11 @@ $on(endGameBtn, "click", () => {
 });
 
 window.addEventListener("focus", () => {
-  if (ui.view === "lobby") requestRoomSync();
+  requestRoomSync();
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && ui.view === "lobby") requestRoomSync();
+  if (!document.hidden) requestRoomSync();
   // Pause background music in a backgrounded tab (setTimeout throttling would
   // otherwise starve the scheduler). On return, resume the context FIRST —
   // unconditionally, so sound effects recover even when music is off — then
@@ -2083,8 +2104,6 @@ $on(musicToggleBtn, "click", () => {
 function init() {
   updateSoundToggle();
   updateMusicToggle();
-  // Music plays app-wide, so its toggle is always available.
-  if (musicToggleBtn) musicToggleBtn.hidden = false;
   const params = new URLSearchParams(location.search);
   const room = params.get("room");
   if (room) {

@@ -1244,15 +1244,34 @@ input::placeholder {
   font-weight: 800;
 }
 
+/* Lobby/staging header: title row with the audio toggles pinned at the top
+   right, and the Copy-invite / Back-to-lobby button on its own row below so
+   it's never squished on narrow screens. */
 .lobby-header {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.lobby-header-row {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 14px;
-  /* Reserve room at the top-right for the fixed sound/music buttons so the
-     Copy-invite / Back-to-lobby button never sits under them. */
-  padding-right: 96px;
+}
+
+.lobby-header > .secondary-button {
+  justify-self: start;
+}
+
+.header-audio-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.header-audio-controls:empty {
+  display: none;
 }
 
 .lobby-list {
@@ -1553,6 +1572,14 @@ input::placeholder {
   grid-column: 1 / -1;
 }
 
+/* Free-for-all roster: let chips wrap to as many columns as actually fit so
+   names aren't crushed on phones (2-3 player games used to force one column
+   per player, truncating every name). 150px leaves room for the finish badge
+   plus the current-turn dice icon without squeezing the name. */
+.team-summary-group.all-players .team-summary-players {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
 .team-player-chip.compact {
   display: flex;
   align-items: center;
@@ -1816,12 +1843,10 @@ body[data-view="game"] .conn-pill {
   display: none !important;
 }
 
-/* Sound + music float fixed in the top-right corner on every room view, so
-   they stay in one consistent spot (matching the bottom-right chat/voice FABs
-   and using the same visual style). */
+/* Sound + music sit in an in-flow slot at the top right of each room view
+   (game top bar, lobby/staging header) so they never cover overlay controls
+   like the chat drawer or rules modal close buttons. */
 .audio-toggle-button {
-  position: fixed;
-  top: max(12px, env(safe-area-inset-top));
   width: 40px;
   height: 40px;
   min-height: 40px;
@@ -1834,21 +1859,10 @@ body[data-view="game"] .conn-pill {
   border: 1px solid var(--line);
   color: var(--accent-strong);
   cursor: pointer;
-  z-index: 1000;
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
   transition: background 0.2s, transform 0.1s, border-color 0.2s;
-}
-
-/* Music sits in the corner; sound effects to its left. Right edge matches the
-   chat/voice FABs so all four buttons share one clean right-edge column. */
-.music-toggle-button {
-  right: max(20px, env(safe-area-inset-right));
-}
-
-.sound-toggle-button {
-  right: calc(max(20px, env(safe-area-inset-right)) + 48px);
 }
 
 .audio-toggle-button:hover {

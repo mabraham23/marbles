@@ -7,6 +7,13 @@ dotenv.config();
 const URL = process.env.UPSTASH_REDIS_REST_URL;
 const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
+// ROOM_STORE=memory forces the in-memory store even when Redis creds exist in
+// .env. Use it for every local/dev run: two server processes sharing one Redis
+// (e.g. a local `npm start` plus the deployed instance) BOTH sweep every room,
+// each driving bot turns and timeouts but broadcasting only to its own
+// sockets — players see frozen UIs and bot moves with the wrong die value.
+const FORCE_MEMORY = process.env.ROOM_STORE === "memory";
+
 const ROOM_KEY_PREFIX = "room:";
 const TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
@@ -104,6 +111,6 @@ class MemoryRoomStore {
 }
 
 export const roomStore =
-  URL && TOKEN
+  !FORCE_MEMORY && URL && TOKEN
     ? new RedisRoomStore(URL, TOKEN)
     : new MemoryRoomStore();

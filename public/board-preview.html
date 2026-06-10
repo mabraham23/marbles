@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Board preview (dev only)</title>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  body { display: grid; place-items: center; min-height: 100vh; margin: 0; }
+  #board { width: min(96vw, 92svh * 520 / 444, 820px); }
+</style>
+</head>
+<body>
+  <svg id="board" viewBox="0 58 520 444" role="img">
+    <defs>
+      <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#1d2939" flood-opacity="0.16" />
+      </filter>
+      <linearGradient id="boardFill" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#f1d9aa" />
+        <stop offset="100%" stop-color="#d9b572" />
+      </linearGradient>
+      <clipPath id="boardClip">
+        <polygon id="boardClipShape" />
+      </clipPath>
+    </defs>
+    <polygon id="boardShape" filter="url(#softShadow)" />
+    <g id="woodLayer" clip-path="url(#boardClip)"></g>
+    <g id="trackLayer"></g>
+    <g id="finishLayer"></g>
+    <g id="homeLayer"></g>
+    <g id="tokenLayer"></g>
+    <g id="moveHintLayer"></g>
+  </svg>
+  <script type="module">
+    import { renderBoardLayers } from "/shared/board-render.js";
+    import { MODULE_LEN, START_OFFSET_IN_MODULE, PLACE, MARBLES_PER_PLAYER } from "/shared/rules.js";
+
+    const playerCount = 6;
+    const state = {
+      playerCount,
+      seatColors: [0, 1, 2, 3, 4, 5],
+      starts: Array.from({ length: playerCount }, (_, p) => p * MODULE_LEN + START_OFFSET_IN_MODULE),
+      marbles: [],
+    };
+    for (let p = 0; p < playerCount; p += 1) {
+      for (let i = 0; i < MARBLES_PER_PLAYER; i += 1) {
+        state.marbles.push({ player: p, seat: p, index: i, place: PLACE.HOME, progress: null, finish: null });
+      }
+    }
+    const layers = {};
+    for (const id of ["boardShape", "boardClipShape", "woodLayer", "trackLayer", "finishLayer", "homeLayer", "tokenLayer"]) {
+      layers[id] = document.getElementById(id);
+    }
+    renderBoardLayers(layers, state, 0);
+  </script>
+</body>
+</html>
