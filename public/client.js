@@ -95,6 +95,7 @@ const statsModal = document.querySelector("#statsModal");
 const statsContent = document.querySelector("#statsContent");
 const statsCloseBtn = document.querySelector("#statsCloseBtn");
 const boardFlipper = document.querySelector("#boardFlipper");
+const boardBackActions = document.querySelector("#boardBackActions");
 const signatureListEl = document.querySelector("#signatureList");
 const signBoardConfirmBtn = document.querySelector("#signBoardConfirmBtn");
 const boardBackReturnBtn = document.querySelector("#boardBackReturnBtn");
@@ -209,6 +210,8 @@ function showView(name) {
       ui.boardFlipped = false;
       boardFlipper?.classList.remove("flipped");
     }
+    document.body.classList.remove("board-flipped");
+    if (boardBackActions) boardBackActions.hidden = true;
   }
   if (name === "name") {
     nameForm.hidden = false;
@@ -1851,6 +1854,9 @@ function updateSignConfirmButton() {
 function flipBoardTo(back) {
   ui.boardFlipped = back;
   if (boardFlipper) boardFlipper.classList.toggle("flipped", back);
+  // The dice make way for the sign/flip buttons below the board.
+  document.body.classList.toggle("board-flipped", back);
+  if (boardBackActions) boardBackActions.hidden = !back;
   if (back) {
     send({ type: "getBoardSignatures" });
     renderSignatures();

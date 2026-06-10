@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=25" />
+    <link rel="stylesheet" href="styles.css?v=26" />
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
@@ -338,10 +338,6 @@
                   <div id="signatureList" class="signature-list"></div>
                 </div>
               </div>
-              <div class="board-back-actions">
-                <button id="signBoardConfirmBtn" class="primary-button" type="button" hidden>Sign the board</button>
-                <button id="boardBackReturnBtn" class="secondary-button" type="button">Flip back</button>
-              </div>
             </div>
           </div>
           <div id="captureFlare" class="capture-flare" hidden aria-live="polite">
@@ -388,6 +384,10 @@
             </div>
             <span id="turnTimerChip" class="turn-timer-chip" hidden></span>
             <button class="dice-button" id="rollButton" type="button" aria-label="Roll dice"></button>
+          </div>
+          <div id="boardBackActions" class="board-back-actions" hidden>
+            <button id="signBoardConfirmBtn" class="primary-button" type="button" hidden>Sign the board</button>
+            <button id="boardBackReturnBtn" class="secondary-button" type="button">Flip back</button>
           </div>
         </section>
       </section>
@@ -445,6 +445,6 @@
     <!-- Hidden container for per-peer remote audio elements -->
     <div id="voiceAudioContainer" hidden aria-hidden="true"></div>
 
-    <script type="module" src="client.js?v=27"></script>
+    <script type="module" src="client.js?v=28"></script>
   </body>
 </html>

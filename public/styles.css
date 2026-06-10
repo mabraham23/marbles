@@ -3292,18 +3292,20 @@ body[data-view="game"] .conn-pill {
   justify-content: center;
 }
 
-.board-face.board-back {
-  position: relative;
+/* While the board shows its back, the dice make way for the sign/flip
+   buttons in the panel below the board. */
+body.board-flipped .dice-panel {
+  display: none;
 }
 
-.board-face.board-back .board-back-actions {
-  position: absolute;
-  bottom: 4%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: 96%;
-  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.4));
+.control-panel .board-back-actions {
+  padding: 14px 0 20px;
+}
+
+.control-panel .board-back-actions .secondary-button {
+  color: var(--wood-soft);
+  background: rgba(255, 245, 222, 0.08);
+  border: 1px solid rgba(224, 184, 112, 0.34);
 }
 
 .wall-modal-stack {
