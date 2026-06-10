@@ -166,6 +166,9 @@ export function createInitialState({ playerCount, mode, playerNames }) {
       firstHome: null, // { player, turnNumber } — first marble to reach a finish hole
     },
     turnRollCount: 0,
+    // Increments every time the current player earns a reroll (1/6), so the
+    // turn timer can grant a fresh window per roll-chain segment.
+    turnSegment: 0,
   };
 }
 
@@ -620,6 +623,7 @@ function nextPlayer(state) {
   state.pendingRoll = null;
   state.pendingDieValue = null;
   state.turnRollCount = 0;
+  state.turnSegment = 0;
 }
 
 export function advanceNoMoveRoll(state, rollId = null) {
@@ -702,6 +706,7 @@ export function applyMove(state, move, roll) {
     nextPlayer(state);
   } else {
     state.log.unshift(`${state.playerNames[state.currentPlayer]} rolls again`);
+    state.turnSegment = (state.turnSegment || 0) + 1;
   }
 
   state.lastMove = {
@@ -746,6 +751,8 @@ export function rollAndCompute(state, dieValue) {
       shouldAdvance: dieValue !== 1 && dieValue !== 6,
       rollId: Math.random().toString(36).substring(2),
     };
+    // A 1/6 with nothing to do still earns a reroll — fresh timer segment.
+    if (!state.noMoveRoll.shouldAdvance) state.turnSegment = (state.turnSegment || 0) + 1;
     state.pendingRoll = null;
     state.pendingDieValue = dieValue;
     state.lastMove = null;

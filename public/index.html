@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=24" />
+    <link rel="stylesheet" href="styles.css?v=25" />
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
@@ -113,13 +113,15 @@
       </div>
     </div>
     <div id="wallModal" class="modal-overlay" hidden>
-      <div class="board-back-panel wall-modal-panel" role="dialog" aria-modal="true" aria-labelledby="wallTitle">
-        <div class="board-back-inner">
-          <h2 id="wallTitle" class="board-back-title">Wall of Champions</h2>
-          <div id="wallSignatureList" class="signature-list"></div>
-          <div class="board-back-actions">
-            <button id="wallCloseBtn" class="secondary-button board-back-close" type="button">Flip it back</button>
+      <div class="wall-modal-stack" role="dialog" aria-modal="true" aria-labelledby="wallTitle">
+        <div class="board-back-panel wall-modal-panel">
+          <div class="board-back-inner">
+            <h2 id="wallTitle" class="board-back-title">Wall of Champions</h2>
+            <div id="wallSignatureList" class="signature-list"></div>
           </div>
+        </div>
+        <div class="board-back-actions">
+          <button id="wallCloseBtn" class="secondary-button board-back-close" type="button">Flip it back</button>
         </div>
       </div>
     </div>
@@ -334,11 +336,11 @@
                 <div class="board-back-inner">
                   <h2 class="board-back-title">Wall of Champions</h2>
                   <div id="signatureList" class="signature-list"></div>
-                  <div class="board-back-actions">
-                    <button id="signBoardConfirmBtn" class="primary-button" type="button" hidden>Sign the board</button>
-                    <button id="boardBackReturnBtn" class="secondary-button" type="button">Flip back</button>
-                  </div>
                 </div>
+              </div>
+              <div class="board-back-actions">
+                <button id="signBoardConfirmBtn" class="primary-button" type="button" hidden>Sign the board</button>
+                <button id="boardBackReturnBtn" class="secondary-button" type="button">Flip back</button>
               </div>
             </div>
           </div>
@@ -443,6 +445,6 @@
     <!-- Hidden container for per-peer remote audio elements -->
     <div id="voiceAudioContainer" hidden aria-hidden="true"></div>
 
-    <script type="module" src="client.js?v=26"></script>
+    <script type="module" src="client.js?v=27"></script>
   </body>
 </html>

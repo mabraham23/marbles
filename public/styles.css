@@ -3283,11 +3283,34 @@ body[data-view="game"] .conn-pill {
   color: #6b4a24;
 }
 
+/* Action buttons live OUTSIDE the hexagon clip so they stay square: floating
+   over the bottom of the board on the game back, stacked under the panel in
+   the home-screen modal. */
 .board-back-actions {
   display: flex;
   gap: 8px;
   justify-content: center;
-  padding-top: 10px;
+}
+
+.board-face.board-back {
+  position: relative;
+}
+
+.board-face.board-back .board-back-actions {
+  position: absolute;
+  bottom: 4%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 96%;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.4));
+}
+
+.wall-modal-stack {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  width: min(480px, 96vw);
 }
 
 .board-back-actions .secondary-button,
@@ -3299,7 +3322,7 @@ body[data-view="game"] .conn-pill {
 
 /* Same wooden hexagon presented as a modal from the home screen. */
 .wall-modal-panel {
-  width: min(480px, 96vw, calc(82svh * 520 / 444));
+  width: min(480px, 96vw, calc(78svh * 520 / 444));
   animation: wall-flip-in 0.6s ease-out both;
 }
 
@@ -3347,7 +3370,7 @@ body[data-view="game"] .conn-pill {
 .stats-row,
 .stats-team-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(6, 32px);
+  grid-template-columns: minmax(0, 1fr) repeat(6, 40px);
   align-items: center;
   gap: 2px;
   padding: 5px 4px;
@@ -3356,12 +3379,37 @@ body[data-view="game"] .conn-pill {
   font-weight: 700;
 }
 
+/* Emoji with a tiny word under it so the columns explain themselves. */
+.stats-col-head {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.stats-col-head i {
+  font-style: normal;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.stats-col-head b {
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  text-align: center;
+  text-transform: uppercase;
+  color: #6b5a3a;
+}
+
 .stats-row span:not(.stats-name),
 .stats-team-row span:not(.stats-name) {
   text-align: center;
 }
 
 .stats-head {
+  align-items: end;
   border-bottom: 1px solid rgba(0, 0, 0, 0.18);
   border-radius: 0;
   font-size: 0.9rem;

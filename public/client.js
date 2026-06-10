@@ -1934,11 +1934,17 @@ function renderStatsModal() {
     state.marbles.filter((m) => m.player === p && m.place === PLACE.FINISH).length);
   const winners = new Set(state.gameOver && state.winner ? getWinningPlayers(state) : []);
 
+  const colHead = (emoji, label, title) =>
+    `<span class="stats-col-head" title="${title}"><i>${emoji}</i><b>${label}</b></span>`;
   const headerRow =
     '<div class="stats-row stats-head"><span class="stats-name"></span>' +
-    '<span title="Captures made">🔥</span><span title="Times captured">💀</span>' +
-    '<span title="Marbles home">🏁</span><span title="Sixes rolled">⚅</span>' +
-    '<span title="Center takes">🎯</span><span title="Longest turn (rolls in one turn)">🔁</span></div>';
+    colHead("🔥", "Smoked", "Captures made") +
+    colHead("💀", "Got smoked", "Times captured") +
+    colHead("🏁", "Home", "Marbles home") +
+    colHead("⚅", "Sixes", "Sixes rolled") +
+    colHead("🎯", "Center", "Center takes") +
+    colHead("🔁", "Best turn", "Most rolls in a single turn (rerolls)") +
+    "</div>";
 
   const playerRow = (p) => {
     const s = stats.players[p] || {};

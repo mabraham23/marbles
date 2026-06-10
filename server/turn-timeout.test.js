@@ -55,7 +55,7 @@ test("turn timeout defaults old rooms to 30 seconds", () => {
   assert.equal(turnTimeLimitForRoom({}), 30);
 });
 
-test("turn deadline arms at turn start and covers roll, move, and reroll", () => {
+test("turn deadline covers roll + move, and a reroll resets the clock", () => {
   const room = makeRoom(makeTwoPlayerState(), { turnTimeLimitSeconds: 15 });
 
   syncTurnDeadline(room, 1_000);
@@ -68,12 +68,12 @@ test("turn deadline arms at turn start and covers roll, move, and reroll", () =>
   syncTurnDeadline(room, 5_000);
   assert.equal(room.pendingMoveDeadlineAt, 16_000);
 
-  // A reroll move (rolled 6) keeps the same turn and the same deadline.
+  // A reroll move (rolled 6) keeps the turn but grants a fresh window.
   const submitted = submitPendingMoveForRoom(room, 0, 6_000);
   assert.equal(submitted.ok, true);
   syncTurnDeadline(room, 6_000);
   assert.equal(room.gameState.currentPlayer, 0);
-  assert.equal(room.pendingMoveDeadlineAt, 16_000);
+  assert.equal(room.pendingMoveDeadlineAt, 21_000);
 
   // A non-reroll move passes the turn and re-arms for the next player.
   rollForCurrentPlayer(room, 2, 7_000);
@@ -82,6 +82,25 @@ test("turn deadline arms at turn start and covers roll, move, and reroll", () =>
   syncTurnDeadline(room, 8_000);
   assert.equal(room.gameState.currentPlayer, 1);
   assert.equal(room.pendingMoveDeadlineAt, 23_000);
+});
+
+test("a 1/6 no-move reroll also resets the clock", () => {
+  const state = makeTwoPlayerState();
+  state.marbles
+    .filter((m) => m.player === 0)
+    .forEach((marble, idx) => {
+      marble.place = PLACE.FINISH;
+      marble.finish = idx;
+    });
+  const room = makeRoom(state, { turnTimeLimitSeconds: 15 });
+  syncTurnDeadline(room, 1_000);
+  assert.equal(room.pendingMoveDeadlineAt, 16_000);
+
+  const moves = rollForCurrentPlayer(room, 6, 5_000);
+  assert.equal(moves.length, 0);
+  assert.equal(state.noMoveRoll.shouldAdvance, false);
+  syncTurnDeadline(room, 5_000);
+  assert.equal(room.pendingMoveDeadlineAt, 20_000);
 });
 
 test("bot turns do not get a deadline", () => {

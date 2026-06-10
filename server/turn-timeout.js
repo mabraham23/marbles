@@ -23,10 +23,11 @@ export function turnTimeLimitForRoom(room) {
   return normalizeTurnTimeLimit(room.turnTimeLimitSeconds) ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
 }
 
-// One deadline per turn: armed when a (human) player's turn begins, and NOT
-// extended by rolling, choosing, or rerolls — the time limit covers the whole
-// turn. When it expires, continueTimedOutAutoPlay rolls and plays for them.
-// Call after every action that might have changed whose turn it is.
+// One deadline per roll-chain segment: armed when a (human) player's turn
+// begins, NOT extended by rolling or choosing, but RESET when a 1/6 earns a
+// reroll (state.turnSegment increments). When it expires,
+// continueTimedOutAutoPlay rolls and plays for them. Call after every action
+// that might have changed whose turn (or segment) it is.
 export function syncTurnDeadline(room, now) {
   const state = room.gameState;
   if (room.phase !== "playing" || !state || state.gameOver) {
@@ -34,7 +35,7 @@ export function syncTurnDeadline(room, now) {
     room.turnDeadlineKey = null;
     return;
   }
-  const key = `${state.turnNumber}:${state.currentPlayer}`;
+  const key = `${state.turnNumber}:${state.currentPlayer}:${state.turnSegment || 0}`;
   if (room.turnDeadlineKey === key) return;
   room.turnDeadlineKey = key;
   const seconds = turnTimeLimitForRoom(room);
