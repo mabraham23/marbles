@@ -1184,38 +1184,37 @@ function renderLobby() {
     }
   }
 
-  // Player list: only filled slots plus one "next seat" row, so the lobby
-  // stays short enough to fit on a phone screen without scrolling.
+  // Player list: all six seats are always visible; the first empty one
+  // offers "+ Add computer player" to the admin, the rest show "waiting…".
   playerListEl.replaceChildren();
-  players.forEach((p, i) => {
-    const li = document.createElement("li");
-    li.className = "lobby-slot filled";
-    if (p.isBot) li.classList.add("is-bot");
-    const adminTag = p.name === adminName ? '<span class="tag">admin</span>' : "";
-    const youTag = p.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
-    const botTag = p.isBot ? '<span class="tag tag-bot">CPU</span>' : "";
-    const handle = ui.playerHandles?.[p.name]?.venmo || null;
-    let handleTag = "";
-    if (ui.entryFee && !p.isBot) {
-      handleTag = handle
-        ? `<span class="tag tag-handle" title="Venmo: @${escapeHTML(handle)}">@${escapeHTML(handle)}</span>`
-        : '<span class="tag tag-missing">no handle</span>';
-    }
-    const removeBtn = ui.isAdmin && p.isBot
-      ? `<button class="bot-remove" type="button" data-bot="${escapeHTML(p.name)}" aria-label="Remove ${escapeHTML(p.name)}">×</button>`
-      : "";
-    li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${botTag}${handleTag}${adminTag}${youTag}${removeBtn}`;
-    playerListEl.append(li);
-  });
-  if (players.length < 6) {
+  let addBotShown = false;
+  for (let i = 0; i < 6; i += 1) {
     const li = document.createElement("li");
     li.className = "lobby-slot";
-    const count = `<span class="slot-count">${players.length}/6</span>`;
-    if (ui.isAdmin && !ui.entryFee) {
+    const p = players[i];
+    if (p) {
+      li.classList.add("filled");
+      if (p.isBot) li.classList.add("is-bot");
+      const adminTag = p.name === adminName ? '<span class="tag">admin</span>' : "";
+      const youTag = p.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
+      const botTag = p.isBot ? '<span class="tag tag-bot">CPU</span>' : "";
+      const handle = ui.playerHandles?.[p.name]?.venmo || null;
+      let handleTag = "";
+      if (ui.entryFee && !p.isBot) {
+        handleTag = handle
+          ? `<span class="tag tag-handle" title="Venmo: @${escapeHTML(handle)}">@${escapeHTML(handle)}</span>`
+          : '<span class="tag tag-missing">no handle</span>';
+      }
+      const removeBtn = ui.isAdmin && p.isBot
+        ? `<button class="bot-remove" type="button" data-bot="${escapeHTML(p.name)}" aria-label="Remove ${escapeHTML(p.name)}">×</button>`
+        : "";
+      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${botTag}${handleTag}${adminTag}${youTag}${removeBtn}`;
+    } else if (ui.isAdmin && !addBotShown && !ui.entryFee) {
+      addBotShown = true;
       li.classList.add("add-bot-slot");
-      li.innerHTML = `<span class="slot-num">${players.length + 1}</span><button class="add-bot" type="button">+ Add computer player</button>${count}`;
+      li.innerHTML = `<span class="slot-num">${i + 1}</span><button class="add-bot" type="button">+ Add computer player</button>`;
     } else {
-      li.innerHTML = `<span class="slot-num">${players.length + 1}</span><span class="slot-empty">waiting for players…</span>${count}`;
+      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-empty">waiting…</span>`;
     }
     playerListEl.append(li);
   }

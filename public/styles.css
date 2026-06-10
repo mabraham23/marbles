@@ -1196,14 +1196,6 @@ body[data-view="staging"] .app-shell {
 }
 .slot-empty { flex: 1; font-style: italic; }
 
-.slot-count {
-  margin-left: auto;
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 800;
-}
-
 .tag {
   flex: 0 0 auto;
   font-size: 0.7rem;
