@@ -324,19 +324,6 @@ input::placeholder {
   stroke-width: 1.55;
 }
 
-.corner-label {
-  fill: #111827;
-  stroke: rgba(255, 250, 235, 0.96);
-  stroke-width: 4px;
-  paint-order: stroke fill;
-  font-family: var(--font-family);
-  font-size: 12px;
-  font-weight: 900;
-  pointer-events: none;
-  text-anchor: middle;
-  dominant-baseline: central;
-}
-
 /* Empty home pads read as recessed parking spots, not marbles — the dashed
    ring keeps them visually distinct from White's tokens and track holes. */
 .home-pad {

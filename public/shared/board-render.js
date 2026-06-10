@@ -12,7 +12,6 @@ import {
   MAX_TRACK_PROGRESS,
   CENTER_PROGRESS,
   CORNER_PROGRESSES,
-  START_OFFSET_IN_MODULE,
   PLAYER_COLORS,
   PLAYER_STROKES,
   PLACE,
@@ -228,30 +227,6 @@ function renderWoodGrain(woodLayer) {
   }
 }
 
-function renderCornerLabels(trackLayer, state, viewerSeat) {
-  // Corner labels are oriented to the local viewer (the seat at the bottom of
-  // the rendered board), not the current-turn player — otherwise the numbers
-  // would shuffle every turn as the perspective rotates. The viewer's start
-  // hole sits at absolute index `viewerSeat * MODULE_LEN + START_OFFSET_IN_MODULE`.
-  const viewerStart = viewerSeat * MODULE_LEN + START_OFFSET_IN_MODULE;
-
-  CORNER_PROGRESSES.forEach((cornerProgress, index) => {
-    const point = trackPoint((viewerStart + cornerProgress) % TRACK_LEN, viewerSeat);
-    const away = normalize({ x: point.x - BOARD_CENTER.x, y: point.y - BOARD_CENTER.y });
-    const labelPoint = {
-      x: point.x + away.x * 32,
-      y: point.y + away.y * 32,
-    };
-    const text = svgEl("text", {
-      class: "corner-label",
-      x: labelPoint.x,
-      y: labelPoint.y + 0.4,
-    });
-    text.textContent = String(index + 1);
-    trackLayer.append(text);
-  });
-}
-
 /**
  * Render the entire board to the provided SVG layers.
  * layers = { boardShape, boardClipShape, woodLayer, finishLayer, trackLayer, homeLayer, tokenLayer }
@@ -284,8 +259,6 @@ export function renderBoardLayers(layers, state, viewerSeat) {
     if (seat !== undefined) circle.setAttribute("stroke", PLAYER_COLORS[seat]);
     trackLayer.append(circle);
   }
-
-  renderCornerLabels(trackLayer, state, viewerSeat);
 
   // Center hole.
   finishLayer.append(svgEl("circle", {
@@ -436,6 +409,9 @@ export function animateAlongPath(tokenLayer, marble, path, onDone) {
   if (path.length < 2) { onDone(); return; }
   const tokenEl = findTokenElement(tokenLayer, marble);
   if (!tokenEl) { onDone(); return; }
+  // SVG z-order is DOM order: raise the traveller so it glides over other
+  // marbles instead of disappearing beneath them mid-flight.
+  tokenLayer.append(tokenEl);
 
   const metrics = buildPathMetrics(path);
   if (metrics.totalDistance === 0) {
@@ -444,7 +420,7 @@ export function animateAlongPath(tokenLayer, marble, path, onDone) {
     return;
   }
 
-  const duration = Math.min(1100, Math.max(260, metrics.totalDistance * 6.5));
+  const duration = Math.min(1300, Math.max(260, metrics.totalDistance * 6.5));
   const start = performance.now();
   setTokenPosition(tokenEl, path[0].x, path[0].y);
 

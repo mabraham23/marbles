@@ -24,9 +24,11 @@ import {
   animateAlongPath as renderAnimateAlongPath,
   pointForMarble,
   pointForMarbleState,
+  findTokenElement,
+  setTokenPosition,
   svgEl,
   tokenLabelColor,
-} from "./shared/board-render.js?v=2";
+} from "./shared/board-render.js?v=3";
 
 // DOM refs
 const homeView = document.querySelector("#homeView");
@@ -1296,17 +1298,12 @@ function moveAccessibleLabel(state, move) {
     : `${move.label}, captures ${bump.token}`;
 }
 
+// Chips sit on their destination hole, so the destination needs no code
+// ("C3"/"CTR"/etc.) — just show which marble would move there, matching how
+// marbles themselves are numbered on the board.
 function moveChipLabel(state, move) {
   const marble = state.marbles[move.marbleIdx];
-  if (move.targetPlace === PLACE.CENTER) return "CTR";
-  if (move.targetPlace === PLACE.FINISH) return `F${(move.targetFinish ?? 0) + 1}`;
-  if (move.label.includes("jumps to corner")) {
-    const match = move.label.match(/corner (\d+)/);
-    return match ? `C${match[1]}` : "JMP";
-  }
-  if (move.label.includes("leaves home")) return marbleToken(marble);
-  if (move.label.includes("backward")) return "BACK";
-  return marbleToken(marble);
+  return String(marble.index + 1);
 }
 
 function disablePendingMoveControls() {
@@ -1713,10 +1710,30 @@ function animateLastMove(lastMove) {
   const sig = JSON.stringify(lastMove);
   if (sig === lastAnimatedMoveSig) return;
   lastAnimatedMoveSig = sig;
-  const path = renderBuildMovePath(ui.game, lastMove, localSeat());
+  const viewerSeat = localSeat();
+  const path = renderBuildMovePath(ui.game, lastMove, viewerSeat);
   const marble = ui.game.marbles[lastMove.marbleIdx];
+  const landing = path[path.length - 1];
+
+  // On a capture the board already shows the final state (victim at home).
+  // Hold the victim on the contested hole so the attacker visibly knocks it
+  // off, then fly it home once the attacker lands.
+  const bumped = lastMove.bumpedIdx != null ? ui.game.marbles[lastMove.bumpedIdx] : null;
+  if (bumped) {
+    const bumpedEl = findTokenElement(tokenLayer, bumped);
+    if (bumpedEl) setTokenPosition(bumpedEl, landing.x, landing.y);
+  }
+
   renderAnimateAlongPath(tokenLayer, marble, path, () => {
-    pulseLastMove(path[path.length - 1], marble.seat);
+    pulseLastMove(landing, marble.seat);
+    if (bumped) {
+      renderAnimateAlongPath(
+        tokenLayer,
+        bumped,
+        [landing, pointForMarble(ui.game, bumped, viewerSeat)],
+        () => {},
+      );
+    }
   });
 }
 
