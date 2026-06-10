@@ -22,7 +22,7 @@ import {
 export const SVG_NS = "http://www.w3.org/2000/svg";
 export const BOARD_CENTER = { x: 260, y: 280 };
 export const BOARD_RADIUS = 245;
-export const TRACK_RADIUS = 165;
+export const TRACK_RADIUS = 185;
 export const CORNER_INSET = 165;
 
 export const boardPoints = makeHexPoints(BOARD_RADIUS, 0);
@@ -84,7 +84,7 @@ function makeArmPoints(sideRow, endpointIndex, direction, target) {
 
 function makeSideRows() {
   const normalAngles = [90, 150, 210, 270, 330, 30];
-  const rowSpacing = 19;
+  const rowSpacing = 21;
   return normalAngles.map((degrees) => {
     const angle = (degrees * Math.PI) / 180;
     const normal = { x: Math.cos(angle), y: Math.sin(angle) };
@@ -139,19 +139,30 @@ export function finishPoint(state, player, slot, viewerSeat) {
 }
 
 export function homePoint(state, player, index, viewerSeat) {
-  const sideCenter = visualSideCenter(state, player, viewerSeat);
-  const away = normalize({ x: sideCenter.x - BOARD_CENTER.x, y: sideCenter.y - BOARD_CENTER.y });
-  let sideDirection = normalize({ x: away.y, y: -away.x });
-  const readsRightToLeft = Math.abs(sideDirection.x) >= Math.abs(sideDirection.y) && sideDirection.x < 0;
-  const readsBottomToTop = Math.abs(sideDirection.y) > Math.abs(sideDirection.x) && sideDirection.y < 0;
+  // Home marbles cluster 2x2 in the outer hexagon corner adjacent to the
+  // player's start hole (the corner their arm-out heads toward).
+  const visSeat = visualSeatForPlayer(state, player, viewerSeat);
+  const corner = boardPoints[(visSeat + 2) % 6];
+  const away = normalize({ x: corner.x - BOARD_CENTER.x, y: corner.y - BOARD_CENTER.y });
+  let colDir = { x: -away.y, y: away.x };
+  const readsRightToLeft = Math.abs(colDir.x) >= Math.abs(colDir.y) && colDir.x < 0;
+  const readsBottomToTop = Math.abs(colDir.y) > Math.abs(colDir.x) && colDir.y < 0;
   if (readsRightToLeft || readsBottomToTop) {
-    sideDirection = { x: -sideDirection.x, y: -sideDirection.y };
+    colDir = { x: -colDir.x, y: -colDir.y };
   }
-  const rowOutset = 26;
-  const rowCenter = { x: sideCenter.x + away.x * rowOutset, y: sideCenter.y + away.y * rowOutset };
-  const spacing = 28;
-  const offset = (index - (MARBLES_PER_PLAYER - 1) / 2) * spacing;
-  return { x: rowCenter.x + sideDirection.x * offset, y: rowCenter.y + sideDirection.y * offset };
+  const rowDir = away.y < 0 ? { x: -away.x, y: -away.y } : away;
+  const clusterOutset = 202;
+  const clusterCenter = {
+    x: BOARD_CENTER.x + away.x * clusterOutset,
+    y: BOARD_CENTER.y + away.y * clusterOutset,
+  };
+  const spacing = 27;
+  const colOffset = ((index % 2) - 0.5) * spacing;
+  const rowOffset = (Math.floor(index / 2) - 0.5) * spacing;
+  return {
+    x: clusterCenter.x + colDir.x * colOffset + rowDir.x * rowOffset,
+    y: clusterCenter.y + colDir.y * colOffset + rowDir.y * rowOffset,
+  };
 }
 
 export function tokenLabelColor(seat) {
@@ -159,10 +170,10 @@ export function tokenLabelColor(seat) {
 }
 
 export function tokenRadius(place) {
-  if (place === PLACE.HOME) return 11;
-  if (place === PLACE.FINISH) return 9;
-  if (place === PLACE.CENTER) return 11;
-  return 9;
+  if (place === PLACE.HOME) return 12;
+  if (place === PLACE.FINISH) return 10;
+  if (place === PLACE.CENTER) return 12;
+  return 10;
 }
 
 export function pointForMarbleState(state, player, place, progress, finish, index, viewerSeat) {
@@ -268,7 +279,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
       class: seat !== undefined ? "hole start-hole" : "hole",
       cx: point.x,
       cy: point.y,
-      r: 7.5,
+      r: 8.5,
     });
     if (seat !== undefined) circle.setAttribute("stroke", PLAYER_COLORS[seat]);
     trackLayer.append(circle);
@@ -281,7 +292,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
     class: "hole center-hole",
     cx: BOARD_CENTER.x,
     cy: BOARD_CENTER.y,
-    r: 7.5,
+    r: 8.5,
   }));
 
   // Finish lanes + home pads per active player.
@@ -293,7 +304,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
         class: "finish-hole",
         cx: point.x,
         cy: point.y,
-        r: 7.5,
+        r: 8.5,
         stroke: PLAYER_COLORS[seat],
       }));
     }
@@ -303,7 +314,7 @@ export function renderBoardLayers(layers, state, viewerSeat) {
         class: "home-pad",
         cx: point.x,
         cy: point.y,
-        r: 9.5,
+        r: 10.5,
       }));
     }
   }

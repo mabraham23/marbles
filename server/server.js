@@ -216,7 +216,7 @@ function lobbyStatePayload(room) {
   return {
     type: "lobbyState",
     code: room.code,
-    players: room.players.map((p) => ({ name: p.name })),
+    players: room.players.map((p) => ({ name: p.name, isBot: !!p.isBot })),
     adminName: room.adminName,
     mode: room.mode,
     validModes: validModes(Math.max(2, room.players.length || 2)),
@@ -231,7 +231,7 @@ function teamStagingStatePayload(room) {
   return {
     type: "teamStagingState",
     code: room.code,
-    players: room.players.map((p) => ({ name: p.name })),
+    players: room.players.map((p) => ({ name: p.name, isBot: !!p.isBot })),
     adminName: room.adminName,
     mode: room.mode,
     entryFee: room.entryFee ?? null,
@@ -258,6 +258,8 @@ function gameStatePayloadFor(room, recipientName) {
   if (room.entryFee) payload.entryFee = room.entryFee;
   if (room.playerHandles) payload.playerHandles = room.playerHandles;
   if (room.settlement) payload.settlement = room.settlement;
+  const botNames = room.players.filter((p) => p.isBot).map((p) => p.name);
+  if (botNames.length) payload.botNames = botNames;
   return payload;
 }
 
@@ -484,6 +486,64 @@ async function handleSetTurnTimeLimit(socket, msg) {
   await broadcastLobby(room);
 }
 
+async function handleSetEntryFee(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase !== "lobby") return sendError(socket, "Game already started");
+  if (room.adminName !== name) return sendError(socket, "Only the admin can change the entry fee");
+  const fee = normalizeEntryFee(msg.entryFee);
+  if (fee && room.players.some((p) => p.isBot)) {
+    return sendError(socket, "Remove computer players to set an entry fee");
+  }
+  // null clears the fee (free game); a positive number sets the buy-in.
+  room.entryFee = fee;
+
+  await roomStore.set(room.code, room);
+  await broadcastLobby(room);
+}
+
+function nextBotName(room) {
+  const taken = new Set(room.players.map((p) => p.name));
+  for (let i = 1; i <= 12; i += 1) {
+    const candidate = `Computer ${i}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+async function handleAddBot(socket) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase !== "lobby") return sendError(socket, "Game already started");
+  if (room.adminName !== name) return sendError(socket, "Only the admin can add a computer player");
+  if (room.players.length >= 6) return sendError(socket, "Lobby full");
+  if (room.entryFee) return sendError(socket, "Clear the entry fee to add computer players");
+  const botName = nextBotName(room);
+  if (!botName) return sendError(socket, "Could not add computer player");
+  room.players.push({ name: botName, isBot: true });
+  await roomStore.set(room.code, room);
+  await broadcastLobby(room);
+}
+
+async function handleRemoveBot(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  if (room.phase !== "lobby") return sendError(socket, "Game already started");
+  if (room.adminName !== name) return sendError(socket, "Only the admin can remove a computer player");
+  const target = typeof msg.botName === "string" ? msg.botName : null;
+  const idx = room.players.findIndex((p) => p.isBot && (target ? p.name === target : true));
+  // With no name, remove the last bot added (most recent).
+  const removeIdx = target ? idx : [...room.players].map((p, i) => (p.isBot ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
+  if (removeIdx < 0) return sendError(socket, "No computer player to remove");
+  const [removed] = room.players.splice(removeIdx, 1);
+  if (removed && room.playerHandles) delete room.playerHandles[removed.name];
+  await roomStore.set(room.code, room);
+  await broadcastLobby(room);
+}
+
 async function handleStartGame(socket) {
   const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
@@ -492,7 +552,8 @@ async function handleStartGame(socket) {
   if (room.adminName !== name) return sendError(socket, "Only the admin can start");
   if (room.players.length < 2) return sendError(socket, "Need at least 2 players");
   if (room.entryFee) {
-    const missing = room.players.filter((p) => !room.playerHandles?.[p.name]?.venmo);
+    // Computer players don't pay in, so they don't need a Venmo handle.
+    const missing = room.players.filter((p) => !p.isBot && !room.playerHandles?.[p.name]?.venmo);
     if (missing.length) {
       return sendError(socket, `Need Venmo handle for: ${missing.map((p) => p.name).join(", ")}`);
     }
@@ -795,6 +856,9 @@ async function handleMessage(socket, raw) {
       case "leaveRoom":      return await handleLeaveRoom(socket);
       case "setMode":        return await handleSetMode(socket, msg);
       case "setTurnTimeLimit": return await handleSetTurnTimeLimit(socket, msg);
+      case "setEntryFee":    return await handleSetEntryFee(socket, msg);
+      case "addBot":         return await handleAddBot(socket);
+      case "removeBot":      return await handleRemoveBot(socket, msg);
       case "startGame":      return await handleStartGame(socket);
       case "returnToLobby":   return await handleReturnToLobby(socket);
       case "resetGame":      return await handleResetGame(socket);
@@ -909,6 +973,33 @@ const heartbeatTimer = setInterval(() => {
 heartbeatTimer.unref();
 wss.on("close", () => clearInterval(heartbeatTimer));
 
+// Drive a computer player's turn by one action (roll, or play the best-ranked
+// move). One action per sweep tick keeps bot play watchable. pendingMoves are
+// already ranked best-first by the shared heuristic, so index 0 is the choice.
+function isBotName(room, name) {
+  return room.players.some((p) => p.isBot && p.name === name);
+}
+
+function driveBotTurn(room, now) {
+  if (room.phase !== "playing" || !room.gameState) return { changed: false };
+  const state = room.gameState;
+  if (state.gameOver) return { changed: false };
+  const currentName = state.playerNames[state.currentPlayer];
+  if (!isBotName(room, currentName)) return { changed: false };
+  // A no-move notice is resolving on its own timer — wait for it.
+  if (state.noMoveRoll?.shouldAdvance) return { changed: false };
+
+  if (room.pendingMoves && room.pendingMovesFor === currentName && room.pendingMoves.length > 0) {
+    const submitted = submitPendingMoveForRoom(room, 0, now);
+    return { changed: submitted.ok };
+  }
+  if (state.pendingRoll == null) {
+    rollForCurrentPlayer(room, rollDie(), now, { startDeadline: false });
+    return { changed: true };
+  }
+  return { changed: false };
+}
+
 // Server-authoritative move timer. Expired move choices are auto-played.
 setInterval(async () => {
   try {
@@ -922,6 +1013,14 @@ setInterval(async () => {
           await roomStore.set(room.code, room);
           await broadcastGame(room);
         }
+        continue;
+      }
+
+      // Computer players take their turns automatically.
+      const botResult = driveBotTurn(room, now);
+      if (botResult.changed) {
+        await roomStore.set(room.code, room);
+        await broadcastGame(room);
         continue;
       }
 

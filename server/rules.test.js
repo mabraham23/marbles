@@ -534,11 +534,12 @@ test("rankMoves: full-chain category order matches confirmed priority", () => {
   const iLeave = ranked.findIndex((m) => m.label.includes("leaves home"));
   const iCenter = ranked.findIndex((m) => m.targetPlace === PLACE.CENTER);
 
+  // Tuned priority (high→low): opponent-bump > finish > leave-home > take-center > forward.
   assert.ok([iFinish, iBump, iForward, iLeave, iCenter].every((i) => i >= 0), "all categories present");
-  assert.ok(iFinish < iBump, "finish ranks above opponent bump");
-  assert.ok(iBump < iForward, "opponent bump ranks above plain forward");
-  assert.ok(iForward < iLeave, "forward ranks above leave home");
+  assert.ok(iBump < iFinish, "opponent bump ranks above finish");
+  assert.ok(iFinish < iLeave, "finish ranks above leave home");
   assert.ok(iLeave < iCenter, "leave home ranks above take center");
+  assert.ok(iCenter < iForward, "take center ranks above plain forward");
   assert.equal(ranked[iBump].bump.isTeammate, false);
 });
 
