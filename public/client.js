@@ -60,7 +60,7 @@ const COPY_CONFIRM_MS = 1000;
 const NO_MOVE_NOTICE_MS = 1400;
 const NO_MOVE_NOTICE_DELAY_MS = 1000;
 const LOBBY_SYNC_MS = 5000;
-const CAPTURE_FLARE_MS = 1200;
+const CAPTURE_FLARE_MS = 1800;
 const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
 
 const nameForm = document.querySelector("#nameForm");

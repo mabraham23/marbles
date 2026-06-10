@@ -489,7 +489,7 @@ input::placeholder {
 }
 
 .capture-flare.is-showing .capture-flare-card {
-  animation: capture-flare-pop 1.2s ease-out both;
+  animation: capture-flare-pop 1.8s ease-out both;
 }
 
 .capture-clown {
@@ -572,28 +572,70 @@ input::placeholder {
   transform: translateX(-50%);
 }
 
+/* Cigarette anchored at the corner of the smile: tan filter at the mouth,
+   white body, ash + glowing ember at the tip. Smoke drifts up off the ember. */
+.capture-cig {
+  position: absolute;
+  left: 25px;
+  bottom: 13px;
+  width: 22px;
+  height: 6px;
+  background: linear-gradient(90deg, #d8af66 0 24%, #fffdf4 24% 88%, #3a3f46 88%);
+  border: 1px solid #1c1f22;
+  border-radius: 2px;
+  transform: rotate(-22deg);
+  transform-origin: left center;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+.capture-cig::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translateY(-50%);
+  background: #ffb13c;
+  border-radius: 50%;
+  box-shadow: 0 0 6px 1px rgba(255, 122, 60, 0.9);
+}
+
 .capture-smoke {
   position: absolute;
-  right: -3px;
   background: rgba(255, 248, 221, 0.88);
   border: 1px solid rgba(224, 184, 112, 0.7);
   border-radius: 999px;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+  animation: capture-smoke-drift 1.5s ease-out infinite;
 }
 
 .capture-smoke.smoke-one {
-  top: 3px;
-  width: 16px;
-  height: 7px;
-  transform: rotate(-22deg);
+  top: 20px;
+  right: -8px;
+  width: 9px;
+  height: 5px;
+  transform: rotate(-14deg);
 }
 
 .capture-smoke.smoke-two {
-  top: 14px;
-  right: -7px;
-  width: 12px;
-  height: 6px;
-  transform: rotate(18deg);
+  top: 9px;
+  right: -12px;
+  width: 14px;
+  height: 7px;
+  transform: rotate(10deg);
+  animation-delay: 0.45s;
+}
+
+@keyframes capture-smoke-drift {
+  0% {
+    translate: 0 0;
+    opacity: 0.95;
+  }
+  100% {
+    translate: 4px -10px;
+    opacity: 0;
+  }
 }
 
 .capture-flare-copy {
