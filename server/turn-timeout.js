@@ -11,7 +11,7 @@ export const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
 export const TURN_TIMEOUT_SWEEP_MS = 1000;
 export const AUTO_CHAIN_STEP_LIMIT = 40;
 export const NO_MOVE_DIE_DISPLAY_MS = 1000;
-export const NO_MOVE_NOTICE_MS = 2400;
+export const NO_MOVE_NOTICE_MS = 1800;
 
 export function normalizeTurnTimeLimit(raw) {
   const seconds = Number(raw);
@@ -23,24 +23,37 @@ export function turnTimeLimitForRoom(room) {
   return normalizeTurnTimeLimit(room.turnTimeLimitSeconds) ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
 }
 
-export function deadlineForRoom(room, now) {
+// One deadline per turn: armed when a (human) player's turn begins, and NOT
+// extended by rolling, choosing, or rerolls — the time limit covers the whole
+// turn. When it expires, continueTimedOutAutoPlay rolls and plays for them.
+// Call after every action that might have changed whose turn it is.
+export function syncTurnDeadline(room, now) {
+  const state = room.gameState;
+  if (room.phase !== "playing" || !state || state.gameOver) {
+    room.pendingMoveDeadlineAt = null;
+    room.turnDeadlineKey = null;
+    return;
+  }
+  const key = `${state.turnNumber}:${state.currentPlayer}`;
+  if (room.turnDeadlineKey === key) return;
+  room.turnDeadlineKey = key;
   const seconds = turnTimeLimitForRoom(room);
-  return seconds > 0 ? now + seconds * 1000 : null;
+  const currentName = state.playerNames[state.currentPlayer];
+  const isBot = (room.players || []).some((p) => p.isBot && p.name === currentName);
+  room.pendingMoveDeadlineAt = seconds > 0 && !isBot ? now + seconds * 1000 : null;
 }
 
-export function rollForCurrentPlayer(room, dieValue, now, opts = {}) {
+export function rollForCurrentPlayer(room, dieValue, now) {
   const state = room.gameState;
   const currentName = state.playerNames[state.currentPlayer];
   const moves = rollAndCompute(state, dieValue);
   if (moves.length > 0) {
     room.pendingMoves = moves;
     room.pendingMovesFor = currentName;
-    room.pendingMoveDeadlineAt = opts.startDeadline === false ? null : deadlineForRoom(room, now);
     room.noMoveAdvanceAt = null;
   } else {
     room.pendingMoves = null;
     room.pendingMovesFor = null;
-    room.pendingMoveDeadlineAt = null;
     if (state.noMoveRoll?.shouldAdvance) {
       state.noMoveRoll.noticeDelayMs = NO_MOVE_DIE_DISPLAY_MS;
       state.noMoveRoll.noticeDurationMs = NO_MOVE_NOTICE_MS;
@@ -104,7 +117,8 @@ export function submitPendingMoveForRoom(room, moveIdx, now) {
   }
   room.pendingMoves = null;
   room.pendingMovesFor = null;
-  room.pendingMoveDeadlineAt = null;
+  // The turn deadline intentionally survives a reroll move — the limit covers
+  // the whole turn. syncTurnDeadline re-arms it once the turn passes.
   return { ok: true, result };
 }
 
@@ -118,15 +132,15 @@ export function continueTimedOutAutoPlay(room, now, rollDie, opts = {}) {
     room.pendingMoveDeadlineAt = null;
   };
   const stepLimit = opts.stepLimit ?? AUTO_CHAIN_STEP_LIMIT;
+  // The deadline covers the whole turn, so it can expire before the player
+  // has even rolled — auto-play then rolls AND picks for them.
   const hasExpiredDeadline =
-    room.pendingMoveDeadlineAt &&
-    room.pendingMoveDeadlineAt <= now &&
-    room.pendingMoves &&
-    room.pendingMoves.length > 0;
+    room.pendingMoveDeadlineAt && room.pendingMoveDeadlineAt <= now;
 
   if (!room.timedOutAutoPlayer) {
     if (!hasExpiredDeadline) return { changed, capped: false };
-    room.timedOutAutoPlayer = room.pendingMovesFor;
+    room.timedOutAutoPlayer =
+      room.pendingMovesFor || room.gameState.playerNames[room.gameState.currentPlayer];
   }
 
   for (let steps = 0; steps < stepLimit; steps += 1) {
@@ -158,7 +172,7 @@ export function continueTimedOutAutoPlay(room, now, rollDie, opts = {}) {
     }
 
     if (state.pendingRoll == null) {
-      rollForCurrentPlayer(room, rollDie(), now, { startDeadline: false });
+      rollForCurrentPlayer(room, rollDie(), now);
       changed = true;
       continue;
     }

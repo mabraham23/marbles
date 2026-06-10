@@ -44,6 +44,8 @@ const venmoInput = document.querySelector("#venmoInput");
 const lobbyFeeBanner = document.querySelector("#lobbyFeeBanner");
 const lobbyFeeEditor = document.querySelector("#lobbyFeeEditor");
 const lobbyFeeInput = document.querySelector("#lobbyFeeInput");
+const feeRevealBtn = document.querySelector("#feeRevealBtn");
+const feeFieldRow = document.querySelector("#feeFieldRow");
 const lobbyPotNote = document.querySelector("#lobbyPotNote");
 const lobbyVenmoPrompt = document.querySelector("#lobbyVenmoPrompt");
 const lobbyVenmoInput = document.querySelector("#lobbyVenmoInput");
@@ -55,11 +57,10 @@ const ERROR_BANNER_MS = 2500;
 const CONNECTED_PILL_MS = 900;
 const OFFLINE_PILL_MS = 1200;
 const COPY_CONFIRM_MS = 1000;
-const NO_MOVE_NOTICE_MS = 1700;
+const NO_MOVE_NOTICE_MS = 1400;
 const NO_MOVE_NOTICE_DELAY_MS = 1000;
 const LOBBY_SYNC_MS = 5000;
 const CAPTURE_FLARE_MS = 1200;
-const TURN_TIME_LIMIT_OPTIONS = [0, 15, 30, 60];
 const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
 
 const nameForm = document.querySelector("#nameForm");
@@ -69,7 +70,6 @@ const lobbyCodeLabel = document.querySelector("#lobbyCodeLabel");
 const copyLinkBtn = document.querySelector("#copyLinkBtn");
 const playerListEl = document.querySelector("#playerList");
 const modePicker = document.querySelector("#modePicker");
-const timeLimitPicker = document.querySelector("#timeLimitPicker");
 const startBtn = document.querySelector("#startBtn");
 const leaveBtn = document.querySelector("#leaveBtn");
 const stagingCodeLabel = document.querySelector("#stagingCodeLabel");
@@ -100,12 +100,11 @@ const teamSummaryList = document.querySelector("#teamSummaryList");
 const rollButton = document.querySelector("#rollButton");
 const dieValueEl = document.querySelector("#dieValue");
 const turnTimerChip = document.querySelector("#turnTimerChip");
-const movesPanel = document.querySelector("#movesPanel");
-const statusPanel = document.querySelector("#statusPanel");
 const resetGameBtn = document.querySelector("#resetGameButton");
 const endGameBtn = document.querySelector("#endGameButton");
-const adminGameDetails = document.querySelector("#adminGameDetails");
-const adminGameActions = document.querySelector("#adminGameActions");
+const adminMenuButton = document.querySelector("#adminMenuButton");
+const adminModal = document.querySelector("#adminModal");
+const adminModalCloseBtn = document.querySelector("#adminModalCloseBtn");
 
 const connPill = document.querySelector("#connPill");
 const soundToggleBtn = document.querySelector("#soundToggleBtn");
@@ -119,7 +118,6 @@ const howToPlayButton = document.querySelector("#howToPlayButton");
 const rulesModal = document.querySelector("#rulesModal");
 const rulesCloseBtn = document.querySelector("#rulesCloseBtn");
 const rulesGotItBtn = document.querySelector("#rulesGotItBtn");
-const gameCommsControls = document.querySelector("#gameCommsControls");
 
 // Client state
 const ui = {
@@ -169,6 +167,7 @@ function showView(name) {
   if (settlementPanel && (name === "home" || name === "name" || name === "staging")) {
     settlementPanel.hidden = true;
   }
+  if (adminModal && name !== "game") adminModal.hidden = true;
   if (name === "name") {
     nameForm.hidden = false;
     document.querySelector("#homeChoices").hidden = true;
@@ -187,10 +186,7 @@ function showView(name) {
   if (chatToggleBtn && chatToggleBtn.parentElement !== document.body) document.body.append(chatToggleBtn);
   if (voiceToggleBtn && voiceToggleBtn.parentElement !== document.body) document.body.append(voiceToggleBtn);
   const roomView = name === "lobby" || name === "staging" || name === "game";
-  if (roomView) {
-    if (chatToggleBtn) chatToggleBtn.hidden = false;
-  } else {
-    if (chatToggleBtn) chatToggleBtn.hidden = true;
+  if (!roomView) {
     if (chatDrawer) {
       chatDrawer.hidden = true;
       chatDrawer.classList.remove("open");
@@ -215,17 +211,15 @@ function showView(name) {
   if (soundToggleBtn) soundToggleBtn.hidden = !roomView;
   if (musicToggleBtn) musicToggleBtn.hidden = !roomView;
 
-  // Manage voice button visibility. Voice is available in room views.
+  // Voice panel is only available in room views.
   const voicePanel = document.querySelector("#voicePanel");
-  if (roomView) {
-    if (voiceToggleBtn) voiceToggleBtn.hidden = false;
-  } else {
-    if (voiceToggleBtn) voiceToggleBtn.hidden = true;
+  if (!roomView) {
     if (voicePanel) { voicePanel.hidden = true; voicePanel.classList.remove("open"); }
     // Leaving the room: stop the mic and tear down any voice connections.
     if (voice.active) leaveVoice();
     voice.isOpen = false;
   }
+  updateCommsFabVisibility();
   if (name !== "game") {
     ui.pendingMoveDeadlineAt = null;
     updateTurnTimer();
@@ -568,6 +562,20 @@ function submitLobbyFee() {
   send({ type: "setEntryFee", entryFee });
 }
 $on(lobbyFeeInput, "change", submitLobbyFee);
+
+// Entry fee is opt-in: collapsed to a "+ Add entry fee" link until tapped,
+// and it collapses again when left empty.
+$on(feeRevealBtn, "click", () => {
+  ui.feeEditorOpen = true;
+  if (feeRevealBtn) feeRevealBtn.hidden = true;
+  if (feeFieldRow) feeFieldRow.hidden = false;
+  lobbyFeeInput?.focus();
+});
+$on(lobbyFeeInput, "blur", () => {
+  if (lobbyFeeInput.value.trim()) return;
+  ui.feeEditorOpen = false;
+  if (ui.lobby) renderLobby();
+});
 
 $on(lobbyVenmoPrompt, "submit", (event) => {
   event.preventDefault();
@@ -1043,9 +1051,9 @@ $on(rulesModal, "click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && rulesModal && !rulesModal.hidden) {
-    closeRulesModal();
-  }
+  if (event.key !== "Escape") return;
+  if (rulesModal && !rulesModal.hidden) closeRulesModal();
+  if (adminModal && !adminModal.hidden) adminModal.hidden = true;
 });
 
 function teamPlayerChipHTML(player, { compact = false, currentPlayerIndex = null, finishedByPlayer = null } = {}) {
@@ -1129,10 +1137,14 @@ function renderLobby() {
   const { code, players, adminName, mode, validModes: vm } = ui.lobby;
   lobbyCodeLabel.textContent = code;
 
-  // Entry fee: admins get an editor, everyone else sees a read-only banner.
+  // Entry fee: admins get an opt-in editor, everyone else a read-only banner.
   const pot = (ui.entryFee || 0) * players.length;
   if (lobbyFeeEditor) {
     lobbyFeeEditor.hidden = !ui.isAdmin;
+    const feeExpanded = Boolean(ui.entryFee) || Boolean(ui.feeEditorOpen) ||
+      document.activeElement === lobbyFeeInput;
+    if (feeRevealBtn) feeRevealBtn.hidden = feeExpanded;
+    if (feeFieldRow) feeFieldRow.hidden = !feeExpanded;
     if (ui.isAdmin && lobbyFeeInput && document.activeElement !== lobbyFeeInput) {
       lobbyFeeInput.value = ui.entryFee ? String(ui.entryFee) : "";
     }
@@ -1172,37 +1184,38 @@ function renderLobby() {
     }
   }
 
-  // Player list
+  // Player list: only filled slots plus one "next seat" row, so the lobby
+  // stays short enough to fit on a phone screen without scrolling.
   playerListEl.replaceChildren();
-  let addBotShown = false;
-  for (let i = 0; i < 6; i += 1) {
+  players.forEach((p, i) => {
+    const li = document.createElement("li");
+    li.className = "lobby-slot filled";
+    if (p.isBot) li.classList.add("is-bot");
+    const adminTag = p.name === adminName ? '<span class="tag">admin</span>' : "";
+    const youTag = p.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
+    const botTag = p.isBot ? '<span class="tag tag-bot">CPU</span>' : "";
+    const handle = ui.playerHandles?.[p.name]?.venmo || null;
+    let handleTag = "";
+    if (ui.entryFee && !p.isBot) {
+      handleTag = handle
+        ? `<span class="tag tag-handle" title="Venmo: @${escapeHTML(handle)}">@${escapeHTML(handle)}</span>`
+        : '<span class="tag tag-missing">no handle</span>';
+    }
+    const removeBtn = ui.isAdmin && p.isBot
+      ? `<button class="bot-remove" type="button" data-bot="${escapeHTML(p.name)}" aria-label="Remove ${escapeHTML(p.name)}">×</button>`
+      : "";
+    li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${botTag}${handleTag}${adminTag}${youTag}${removeBtn}`;
+    playerListEl.append(li);
+  });
+  if (players.length < 6) {
     const li = document.createElement("li");
     li.className = "lobby-slot";
-    const p = players[i];
-    if (p) {
-      li.classList.add("filled");
-      if (p.isBot) li.classList.add("is-bot");
-      const adminTag = p.name === adminName ? '<span class="tag">admin</span>' : "";
-      const youTag = p.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
-      const botTag = p.isBot ? '<span class="tag tag-bot">CPU</span>' : "";
-      const handle = ui.playerHandles?.[p.name]?.venmo || null;
-      let handleTag = "";
-      if (ui.entryFee && !p.isBot) {
-        handleTag = handle
-          ? `<span class="tag tag-handle" title="Venmo: @${escapeHTML(handle)}">@${escapeHTML(handle)}</span>`
-          : '<span class="tag tag-missing">no handle</span>';
-      }
-      const removeBtn = ui.isAdmin && p.isBot
-        ? `<button class="bot-remove" type="button" data-bot="${escapeHTML(p.name)}" aria-label="Remove ${escapeHTML(p.name)}">×</button>`
-        : "";
-      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${botTag}${handleTag}${adminTag}${youTag}${removeBtn}`;
-    } else if (ui.isAdmin && !addBotShown && !ui.entryFee && players.length < 6) {
-      // One "Add computer player" action in the first empty slot.
-      addBotShown = true;
+    const count = `<span class="slot-count">${players.length}/6</span>`;
+    if (ui.isAdmin && !ui.entryFee) {
       li.classList.add("add-bot-slot");
-      li.innerHTML = `<span class="slot-num">${i + 1}</span><button class="add-bot" type="button">+ Add computer player</button>`;
+      li.innerHTML = `<span class="slot-num">${players.length + 1}</span><button class="add-bot" type="button">+ Add computer player</button>${count}`;
     } else {
-      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-empty">waiting…</span>`;
+      li.innerHTML = `<span class="slot-num">${players.length + 1}</span><span class="slot-empty">waiting for players…</span>${count}`;
     }
     playerListEl.append(li);
   }
@@ -1213,39 +1226,21 @@ function renderLobby() {
     label.className = "mode-label";
     label.textContent = "Game mode:";
     modePicker.append(label);
+    const options = document.createElement("div");
+    options.className = "mode-options";
     vm.forEach((m) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = `mode-button${mode === m ? " selected" : ""}`;
       btn.textContent = modeLabel(m, players.length);
       btn.addEventListener("click", () => send({ type: "setMode", mode: m }));
-      modePicker.append(btn);
+      options.append(btn);
     });
+    modePicker.append(options);
   } else if (!ui.isAdmin) {
     modePicker.textContent = `Waiting for ${adminName} to start…`;
   } else {
     modePicker.textContent = "Need at least 2 players to start.";
-  }
-
-  if (timeLimitPicker) {
-    timeLimitPicker.replaceChildren();
-    const selectedLimit = ui.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
-    if (ui.isAdmin) {
-      const label = document.createElement("div");
-      label.className = "mode-label";
-      label.textContent = "Turn limit:";
-      timeLimitPicker.append(label);
-      TURN_TIME_LIMIT_OPTIONS.forEach((seconds) => {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = `mode-button${selectedLimit === seconds ? " selected" : ""}`;
-        btn.textContent = seconds === 0 ? "Off" : `${seconds}s`;
-        btn.addEventListener("click", () => send({ type: "setTurnTimeLimit", seconds }));
-        timeLimitPicker.append(btn);
-      });
-    } else {
-      timeLimitPicker.textContent = `Turn limit: ${selectedLimit === 0 ? "Off" : `${selectedLimit}s`}`;
-    }
   }
 
   startBtn.hidden = !ui.isAdmin;
@@ -1315,14 +1310,7 @@ function moveChipLabel(state, move) {
   return marbleToken(marble);
 }
 
-function moveDisplayLabel(state, move) {
-  return moveAccessibleLabel(state, move);
-}
-
 function disablePendingMoveControls() {
-  Array.from(movesPanel.querySelectorAll("button")).forEach((button) => {
-    button.disabled = true;
-  });
   Array.from(moveHintLayer.querySelectorAll("[role='button']")).forEach((button) => {
     button.classList.add("move-hint-disabled");
     button.setAttribute("aria-disabled", "true");
@@ -1441,17 +1429,14 @@ function renderGame() {
   const cp = state.currentPlayer;
   const seat = state.seatColors[cp];
   const isMyTurn = state.currentPlayer === localPlayerIdx();
-  if (adminGameDetails) adminGameDetails.hidden = !ui.isAdmin;
-  resetGameBtn.hidden = !ui.isAdmin;
-  endGameBtn.hidden = !ui.isAdmin;
-  adminGameActions.hidden = !ui.isAdmin;
+  // Admin actions live behind the top-bar Admin button so a stray tap can't
+  // reset or end the game.
+  if (adminMenuButton) adminMenuButton.hidden = !ui.isAdmin;
+  if (!ui.isAdmin && adminModal) adminModal.hidden = true;
 
   rollButton.style.setProperty("--dice-color", PLAYER_COLORS[seat]);
   rollButton.style.setProperty("--dice-stroke", PLAYER_STROKES[seat]);
   rollButton.style.setProperty("--dice-ink", tokenLabelColor(seat));
-  movesPanel.style.setProperty("--current-player-color", PLAYER_COLORS[seat]);
-  movesPanel.style.setProperty("--current-player-stroke", PLAYER_STROKES[seat]);
-  movesPanel.style.setProperty("--current-player-ink", tokenLabelColor(seat));
 
   // Turn panel
   if (state.gameOver) {
@@ -1499,28 +1484,9 @@ function renderGame() {
   }
   rollButton.disabled = !canRoll || Boolean(diceSpinTimer);
 
-  // Moves panel
-  movesPanel.replaceChildren();
-  if (isMyTurn && ui.pendingMoves && ui.pendingMoves.length > 0) {
-    ui.pendingMoves.forEach((m, idx) => {
-      const b = document.createElement("button");
-      b.className = "move-button";
-      if (m.bump) b.classList.add(m.bump.isTeammate ? "teammate-bump" : "opponent-bump");
-      b.type = "button";
-      b.textContent = moveDisplayLabel(state, m);
-      b.addEventListener("click", () => submitPendingMove(idx));
-      movesPanel.append(b);
-    });
-  } else if (isMyTurn && state.pendingDieValue != null && !canRoll) {
-    const empty = document.createElement("p");
-    empty.className = "moves-note";
-    empty.textContent = "No move available.";
-    movesPanel.append(empty);
-  }
+  // Moves are picked directly on the board (renderMoveHints) — no list view.
   // Teams
   renderPinnedTeamSummary();
-  // Status
-  renderStatus();
   // Settlement
   renderSettlement();
   // Board + animation
@@ -1730,32 +1696,6 @@ function renderCreditCard(t, idx) {
   actions.append(toggleBtn);
   card.append(actions);
   return card;
-}
-
-function renderStatus() {
-  const state = ui.game;
-  const rows = [];
-  for (let player = 0; player < state.playerCount; player += 1) {
-    const seat = state.seatColors[player];
-    const playerMarbles = state.marbles.filter((m) => m.player === player);
-    const atHome = playerMarbles.filter((m) => m.place === PLACE.HOME).length;
-    const finished = playerMarbles.filter((m) => m.place === PLACE.FINISH).length;
-
-    rows.push(
-      `<div class="player-row">` +
-        `<div class="player-info">` +
-          `<span class="swatch" style="background:${PLAYER_COLORS[seat]};border:1px solid ${PLAYER_STROKES[seat]}"></span>` +
-          `<span class="player-name">${escapeHTML(state.playerNames[player])}</span>` +
-        `</div>` +
-        `<div class="player-stats">` +
-          `<span class="stat-badge home-badge" title="Marbles still at Home">🏠 ${atHome}</span>` +
-          `<span class="stat-badge finish-badge" title="Marbles made it Home">🏁 ${finished}</span>` +
-        `</div>` +
-      `</div>`,
-    );
-  }
-  const recent = state.log.slice(0, 6).map((e) => `<div class="log-row">${escapeHTML(e)}</div>`).join("");
-  statusPanel.innerHTML = `<div class="info-group"><h2>Players</h2>${rows.join("")}</div><div class="info-group"><h2>History</h2>${recent}</div>`;
 }
 
 function renderBoard() {
@@ -2023,9 +1963,24 @@ $on(rollButton, "click", () => {
   send({ type: "roll" });
 });
 
+function closeAdminModal() {
+  if (adminModal) adminModal.hidden = true;
+}
+
+$on(adminMenuButton, "click", () => {
+  if (!ui.isAdmin || !adminModal) return;
+  adminModal.hidden = false;
+  adminModalCloseBtn?.focus();
+});
+$on(adminModalCloseBtn, "click", closeAdminModal);
+$on(adminModal, "click", (event) => {
+  if (event.target === adminModal) closeAdminModal();
+});
+
 $on(resetGameBtn, "click", () => {
   if (!ui.isAdmin) return;
   if (!window.confirm("Reset this game and start over from the beginning?")) return;
+  closeAdminModal();
   send({ type: "resetGame" });
 });
 
@@ -2043,6 +1998,7 @@ $on(winLobbyBtn, "click", () => {
 $on(endGameBtn, "click", () => {
   if (!ui.isAdmin) return;
   if (!window.confirm("End this game and return everyone to the lobby?")) return;
+  closeAdminModal();
   send({ type: "endGame" });
 });
 
@@ -2219,13 +2175,21 @@ function updateChatBadge() {
   }
 }
 
+// Both floating buttons hide while either drawer is open, so neither can
+// hover over the open drawer's own controls (e.g. the chat send button).
+function updateCommsFabVisibility() {
+  const roomView = ui.view === "lobby" || ui.view === "staging" || ui.view === "game";
+  const drawerOpen = ui.isChatOpen || voice.isOpen;
+  if (chatToggleBtn) chatToggleBtn.hidden = !roomView || drawerOpen;
+  if (voiceToggleBtn) voiceToggleBtn.hidden = !roomView || drawerOpen;
+}
+
 function toggleChat() {
   if (!chatDrawer) return;
   ui.isChatOpen = !ui.isChatOpen;
   if (ui.isChatOpen) {
     updateChatViewportInset();
     chatDrawer.hidden = false;
-    if (chatToggleBtn) chatToggleBtn.hidden = true;
     // Force a reflow
     chatDrawer.offsetHeight;
     chatDrawer.classList.add("open");
@@ -2240,13 +2204,11 @@ function toggleChat() {
   } else {
     if (chatInput) chatInput.blur();
     chatDrawer.classList.remove("open");
-    if (chatToggleBtn && (ui.view === "lobby" || ui.view === "staging" || ui.view === "game")) {
-      chatToggleBtn.hidden = false;
-    }
     setTimeout(() => {
       if (!ui.isChatOpen) chatDrawer.hidden = true;
     }, 350);
   }
+  updateCommsFabVisibility();
 }
 
 function isMobileChatViewport() {
@@ -2454,6 +2416,7 @@ function toggleVoicePanel() {
   voicePanel.hidden = !voice.isOpen;
   voicePanel.classList.toggle("open", voice.isOpen);
   if (voice.isOpen) renderVoice();
+  updateCommsFabVisibility();
 }
 
 function renderVoice() {

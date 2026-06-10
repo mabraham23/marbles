@@ -32,6 +32,7 @@ import {
   normalizeTurnTimeLimit,
   rollForCurrentPlayer,
   submitPendingMoveForRoom,
+  syncTurnDeadline,
   turnTimeLimitForRoom,
 } from "./turn-timeout.js";
 
@@ -593,11 +594,13 @@ async function handleStartGame(socket) {
   room.pendingMoves = null;
   room.pendingMovesFor = null;
   room.pendingMoveDeadlineAt = null;
+  room.turnDeadlineKey = null;
   room.noMoveAdvanceAt = null;
   room.timedOutAutoPlayer = null;
   room.settlement = null;
   room.lastMoveAt = Date.now();
   room.completedAt = null;
+  syncTurnDeadline(room, room.lastMoveAt);
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -649,11 +652,13 @@ async function handleResetGame(socket) {
   room.pendingMoves = null;
   room.pendingMovesFor = null;
   room.pendingMoveDeadlineAt = null;
+  room.turnDeadlineKey = null;
   room.noMoveAdvanceAt = null;
   room.timedOutAutoPlayer = null;
   room.settlement = null;
   room.lastMoveAt = Date.now();
   room.completedAt = null;
+  syncTurnDeadline(room, room.lastMoveAt);
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -666,8 +671,15 @@ async function handleEndGame(socket) {
   if (room.phase !== "playing") return sendError(socket, "Game not started");
   if (room.adminName !== name) return sendError(socket, "Only the admin can end the game");
 
+  // Preserve isBot when rebuilding the roster — otherwise computer players
+  // come back to the lobby as zombie humans whose turns only ever advance
+  // via the 30s timeout.
   const names = room.gameState?.playerNames || room.players.map((p) => p.name);
-  room.players = names.map((playerName) => ({ name: playerName }));
+  const prevByName = new Map(room.players.map((p) => [p.name, p]));
+  room.players = names.map((playerName) => ({
+    name: playerName,
+    ...(prevByName.get(playerName)?.isBot ? { isBot: true } : {}),
+  }));
   room.phase = "lobby";
   room.gameState = null;
   room.pendingMoves = null;
@@ -696,7 +708,9 @@ async function handleRoll(socket) {
   if (state.pendingRoll != null) return sendError(socket, "Already rolled");
   if (state.noMoveRoll?.shouldAdvance) return sendError(socket, "No-move roll is resolving");
 
-  rollForCurrentPlayer(room, rollDie(), Date.now());
+  const now = Date.now();
+  rollForCurrentPlayer(room, rollDie(), now);
+  syncTurnDeadline(room, now);
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -717,6 +731,7 @@ async function handleSubmitMove(socket, msg) {
   room.timedOutAutoPlayer = null;
   // Give this move's animation time to land before a following bot acts.
   room.botNextActAt = now + BOT_STEP_DELAY_MS;
+  syncTurnDeadline(room, now);
 
   await roomStore.set(room.code, room);
   await broadcastGame(room);
@@ -1006,7 +1021,7 @@ function driveBotTurn(room, now) {
     return { changed: submitted.ok };
   }
   if (state.pendingRoll == null) {
-    rollForCurrentPlayer(room, rollDie(), now, { startDeadline: false });
+    rollForCurrentPlayer(room, rollDie(), now);
     // A 1/6 that can't move re-rolls on its own turn; hold long enough for
     // the "no valid moves" notice to play out before the next die appears.
     room.botNextActAt = state.noMoveRoll && !state.noMoveRoll.shouldAdvance
@@ -1027,6 +1042,7 @@ setInterval(async () => {
       if (noMoveAdvanceDue) {
         const result = continueDelayedNoMoveRoll(room, now);
         if (result.changed) {
+          syncTurnDeadline(room, now);
           await roomStore.set(room.code, room);
           await broadcastGame(room);
         }
@@ -1036,21 +1052,22 @@ setInterval(async () => {
       // Computer players take their turns automatically.
       const botResult = driveBotTurn(room, now);
       if (botResult.changed) {
+        syncTurnDeadline(room, now);
         await roomStore.set(room.code, room);
         await broadcastGame(room);
         continue;
       }
 
       const shouldContinueAuto = Boolean(room.timedOutAutoPlayer);
+      // The deadline covers the whole turn, so it can expire before the
+      // player has rolled — auto-play rolls and picks for them either way.
       const deadlineExpired =
-        room.pendingMoveDeadlineAt &&
-        room.pendingMoveDeadlineAt <= now &&
-        room.pendingMoves &&
-        room.pendingMoves.length > 0;
+        room.pendingMoveDeadlineAt && room.pendingMoveDeadlineAt <= now;
       if (!shouldContinueAuto && !deadlineExpired) continue;
 
       const result = continueTimedOutAutoPlay(room, now, rollDie);
       if (!result.changed) continue;
+      syncTurnDeadline(room, now);
       await roomStore.set(room.code, room);
       await broadcastGame(room);
     }

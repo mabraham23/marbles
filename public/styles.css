@@ -71,6 +71,20 @@ button:disabled {
   padding: max(8px, env(safe-area-inset-top)) 10px calc(max(14px, env(safe-area-inset-bottom)) + 76px);
 }
 
+/* The game view is designed to fill exactly one screen (no scroll), and its
+   centered dice button doesn't collide with the corner FABs — drop the FAB
+   reserve so the layout actually fits 100svh. */
+body[data-view="game"] .app-shell {
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+}
+
+/* Lobby/staging also fill one screen; a slimmer reserve keeps the corner
+   FABs just below the Leave/Start row instead of on top of it. */
+body[data-view="lobby"] .app-shell,
+body[data-view="staging"] .app-shell {
+  padding-bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -239,8 +253,7 @@ input::placeholder {
   accent-color: var(--accent);
 }
 
-.primary-button,
-.move-button {
+.primary-button {
   min-height: var(--tap);
   padding: 0 16px;
   color: #15100a;
@@ -252,7 +265,6 @@ input::placeholder {
 
 .primary-button:active,
 .dice-button:active,
-.move-button:active,
 .icon-button:active {
   transform: translateY(1px);
 }
@@ -714,18 +726,6 @@ input::placeholder {
   box-shadow: none;
 }
 
-.game-comms-controls {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  min-height: 48px;
-  margin: -2px 10px 2px;
-}
-
-.game-comms-controls:empty {
-  display: none;
-}
-
 .dice-panel {
   display: grid;
   justify-items: center;
@@ -867,184 +867,32 @@ input::placeholder {
   }
 }
 
-.moves {
-  display: grid;
-  gap: 8px;
-}
-
-.move-button {
-  width: 100%;
-  --move-bg: var(--current-player-stroke, #8f1f27);
-  --move-border: var(--current-player-color, #d9363e);
-  --move-ink: var(--current-player-ink, #fff5de);
-  color: var(--move-ink);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent 34%),
-    var(--move-bg);
-  border: 2px solid var(--move-border);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 8px 18px rgba(0, 0, 0, 0.22);
-  text-align: left;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.28);
-}
-
-/* Opponent capture: golden accent matching the on-board capture style. */
-.move-button.opponent-bump {
-  outline: 2px solid #ffdf7a;
-  outline-offset: -2px;
-}
-
-/* Teammate bump: warning the player they'd send their own teammate home. */
-.move-button.teammate-bump {
-  outline: 2px dashed #ff7a59;
-  outline-offset: -2px;
-  opacity: 0.92;
-}
-
-.move-button.teammate-bump::before {
-  content: "⚠ ";
-}
-
-.moves-note {
-  margin: 0;
-  padding: 10px 12px;
-  color: var(--muted);
-  background: rgba(255, 245, 222, 0.08);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  font-weight: 600;
-}
-
-.game-details {
-  color: var(--muted);
-  background: rgba(255, 245, 222, 0.08);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.admin-game-actions {
-  display: grid;
-  gap: 8px;
-  padding: 0 12px 12px;
-}
-
-.admin-game-actions .secondary-button {
-  width: 100%;
-  color: #ffced3;
-  background: rgba(184, 50, 58, 0.16);
-  border-color: rgba(255, 182, 189, 0.34);
-}
-
-.game-details summary {
-  min-height: 42px;
-  padding: 11px 12px;
-  color: var(--ink);
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 800;
-}
-
-.status {
-  display: grid;
-  gap: 12px;
-  max-height: 28svh;
-  overflow: auto;
+/* Admin actions live in a modal behind the top-bar Admin button so a stray
+   tap can't reset or end the game. */
+.admin-modal-note {
+  margin: 0 0 12px;
   color: var(--muted);
   font-size: 0.86rem;
-  line-height: 1.35;
-  padding: 0 12px 12px;
 }
 
-.info-group h2 {
-  margin: 0 0 4px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
+.admin-modal-actions {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
 }
 
-.player-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 5px 0;
-  border-top: 1px solid rgba(224, 184, 112, 0.16);
-}
-
-.player-row:first-child {
-  border-top: 0;
-}
-
-.player-info {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  flex-shrink: 1;
-}
-
-.player-name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 500;
-}
-
-.player-stats {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-.stat-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.04);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid rgba(224, 184, 112, 0.1);
-  color: var(--ink);
-  user-select: none;
-}
-
-.stat-badge.home-badge {
-  border-color: rgba(224, 184, 112, 0.15);
-}
-
-.stat-badge.finish-badge {
-  border-color: rgba(123, 220, 121, 0.15);
-  color: #7bdc79;
+/* Dark red on the light modal card. */
+.admin-modal-actions .secondary-button {
+  width: 100%;
+  color: #8f1f27;
+  background: rgba(184, 50, 58, 0.1);
+  border: 1px solid rgba(143, 31, 39, 0.45);
 }
 
 .team-badge {
   flex-shrink: 0;
   font-size: 0.76rem;
   color: var(--muted);
-}
-
-.swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 7px;
-  border-radius: 50%;
-  vertical-align: -1px;
-}
-
-.log-row {
-  padding: 4px 0;
-  border-top: 1px solid rgba(224, 184, 112, 0.16);
-}
-
-.log-row:first-of-type {
-  border-top: 0;
 }
 
 .winner {
@@ -1244,24 +1092,31 @@ input::placeholder {
   font-weight: 800;
 }
 
-/* Lobby/staging header: title row with the audio toggles pinned at the top
-   right, and the Copy-invite / Back-to-lobby button on its own row below so
-   it's never squished on narrow screens. */
+/* Lobby/staging header, two compact rows: title + audio toggles, then room
+   code + Copy-invite / Back-to-lobby. Keeps everything reachable without
+   squishing buttons or wasting a screenful of header space. */
 .lobby-header {
   display: grid;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .lobby-header-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
 }
 
-.lobby-header > .secondary-button {
-  justify-self: start;
+/* Room headers use a compact title so lobby/staging fit on one phone screen
+   (the home view keeps the big marble title). */
+.lobby-header .title {
+  margin: 0;
+  font-size: clamp(1.5rem, 6.5vw, 2.1rem);
+}
+
+.lobby-code-row .subtitle {
+  margin: 0;
 }
 
 .header-audio-controls {
@@ -1274,11 +1129,26 @@ input::placeholder {
   display: none;
 }
 
+/* Lobby/staging cards stretch to the full viewport height… */
+body[data-view="lobby"] .app-shell,
+body[data-view="staging"] .app-shell {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+#lobbyView {
+  display: flex;
+  flex-direction: column;
+}
+
+/* …and the player list absorbs the leftover height, spreading its rows so
+   the screen feels filled rather than cramped at the top. */
 .lobby-list {
   list-style: none;
-  margin: 0 0 16px;
+  flex: 1;
+  margin: 0 0 12px;
   padding: 0;
   display: grid;
+  align-content: space-evenly;
   gap: 6px;
 }
 
@@ -1326,6 +1196,14 @@ input::placeholder {
 }
 .slot-empty { flex: 1; font-style: italic; }
 
+.slot-count {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
 .tag {
   flex: 0 0 auto;
   font-size: 0.7rem;
@@ -1346,11 +1224,11 @@ input::placeholder {
 .mode-picker {
   display: grid;
   gap: 8px;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(255, 245, 222, 0.06);
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   color: var(--muted);
   font-size: 0.9rem;
 }
@@ -1361,6 +1239,19 @@ input::placeholder {
   text-transform: uppercase;
   font-size: 0.78rem;
   letter-spacing: 0.05em;
+}
+
+/* Mode choices flow as wrapping pills instead of stacked rows so the picker
+   stays short on phones. */
+.mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mode-options .mode-button {
+  flex: 1 1 auto;
+  text-align: center;
 }
 
 .mode-button {
@@ -1377,19 +1268,6 @@ input::placeholder {
 .mode-button.selected {
   border-color: var(--accent);
   background: rgba(216, 175, 102, 0.16);
-}
-
-.time-limit-picker {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.time-limit-picker .mode-label {
-  grid-column: 1 / -1;
-}
-
-.time-limit-picker .mode-button {
-  padding: 0 8px;
-  text-align: center;
 }
 
 .lobby-actions {
@@ -1493,6 +1371,17 @@ input::placeholder {
   justify-self: center;
   width: min(100%, 420px);
   margin: 0 auto 9px;
+}
+
+.game-top-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.admin-menu-button {
+  color: #ffced3;
+  border-color: rgba(255, 182, 189, 0.34);
 }
 
 .game-top-controls .help-button {
@@ -1670,11 +1559,16 @@ input::placeholder {
   grid-area: 3 / 3;
 }
 
+/* Top bar and roster hug the top; the board row takes all leftover height
+   with the board centered in it, and the dice sit beneath, anchored toward
+   the bottom where thumbs reach. The fixed height makes the board row
+   SHRINK on short viewports (the board scales down via max-height) instead
+   of pushing the page into a scroll. (Desktop overrides this grid below.) */
 #gameView {
   display: grid;
-  align-content: start;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 0;
-  min-height: calc(100svh - 22px);
+  height: calc(100svh - 22px);
 }
 
 @media (min-width: 820px) {
@@ -1767,11 +1661,6 @@ input::placeholder {
     border: 1px solid var(--line);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-  }
-
-  .game-comms-controls {
-    justify-content: center;
-    margin: 0;
   }
 
   .dice-panel {
@@ -2665,43 +2554,6 @@ body[data-view="game"] .conn-pill {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 14px rgba(110, 231, 160, 0.35);
 }
 
-body[data-view="game"] .game-comms-controls .chat-toggle-button,
-body[data-view="game"] .game-comms-controls .voice-toggle-button {
-  position: static;
-  width: 48px;
-  height: 48px;
-  display: flex;
-  flex: 0 0 48px;
-  color: var(--accent-strong);
-  background: rgba(20, 24, 30, 0.75);
-  border: 1px solid var(--line);
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transform: none;
-}
-
-body[data-view="game"] .game-comms-controls .chat-toggle-button:hover,
-body[data-view="game"] .game-comms-controls .voice-toggle-button:hover {
-  transform: translateY(-1px);
-  border-color: var(--accent);
-  box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.42),
-    0 0 15px rgba(216, 175, 102, 0.2);
-}
-
-body[data-view="game"] .game-comms-controls .chat-toggle-button:active,
-body[data-view="game"] .game-comms-controls .voice-toggle-button:active {
-  transform: scale(0.95);
-}
-
-body[data-view="game"] .game-comms-controls .voice-toggle-button.active {
-  color: #6ee7a0;
-  border-color: rgba(110, 231, 160, 0.6);
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.34),
-    0 0 14px rgba(110, 231, 160, 0.35);
-}
 
 .voice-panel {
   position: fixed;
@@ -2939,8 +2791,34 @@ body[data-view="game"] .game-comms-controls .voice-toggle-button.active {
   margin: 0 0 12px;
 }
 
+/* Collapsed entry-fee affordance — fee is opt-in, tap to reveal the input. */
+.fee-reveal {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent-strong);
+  font-weight: 800;
+  font-size: 0.88rem;
+  text-align: left;
+}
+
+.fee-reveal:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* Single compact row: label left, $ input right. */
 .lobby-fee-editor .fee-field {
   margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lobby-fee-editor .fee-input-wrap {
+  flex: 0 0 auto;
+  width: 132px;
 }
 
 .lobby-fee-editor .fee-help {

@@ -11,6 +11,7 @@ import {
   normalizeTurnTimeLimit,
   rollForCurrentPlayer,
   submitPendingMoveForRoom,
+  syncTurnDeadline,
   turnTimeLimitForRoom,
 } from "./turn-timeout.js";
 
@@ -18,10 +19,12 @@ function makeRoom(state, opts = {}) {
   return {
     code: "TEST",
     phase: "playing",
+    players: (state?.playerNames || []).map((name) => ({ name })),
     gameState: state,
     pendingMoves: null,
     pendingMovesFor: null,
     pendingMoveDeadlineAt: null,
+    turnDeadlineKey: null,
     timedOutAutoPlayer: null,
     turnTimeLimitSeconds: opts.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS,
     entryFee: null,
@@ -52,23 +55,46 @@ test("turn timeout defaults old rooms to 30 seconds", () => {
   assert.equal(turnTimeLimitForRoom({}), 30);
 });
 
-test("roll with moves creates deadline and manual submit clears it", () => {
+test("turn deadline arms at turn start and covers roll, move, and reroll", () => {
   const room = makeRoom(makeTwoPlayerState(), { turnTimeLimitSeconds: 15 });
 
-  const moves = rollForCurrentPlayer(room, 6, 1_000);
-
-  assert.equal(moves.length > 0, true);
-  assert.equal(room.pendingMovesFor, "Admin");
+  syncTurnDeadline(room, 1_000);
   assert.equal(room.pendingMoveDeadlineAt, 16_000);
 
-  const submitted = submitPendingMoveForRoom(room, 0, 2_000);
+  // Rolling does not restart the clock.
+  const moves = rollForCurrentPlayer(room, 6, 5_000);
+  assert.equal(moves.length > 0, true);
+  assert.equal(room.pendingMovesFor, "Admin");
+  syncTurnDeadline(room, 5_000);
+  assert.equal(room.pendingMoveDeadlineAt, 16_000);
+
+  // A reroll move (rolled 6) keeps the same turn and the same deadline.
+  const submitted = submitPendingMoveForRoom(room, 0, 6_000);
   assert.equal(submitted.ok, true);
-  assert.equal(room.pendingMoves, null);
-  assert.equal(room.pendingMovesFor, null);
+  syncTurnDeadline(room, 6_000);
+  assert.equal(room.gameState.currentPlayer, 0);
+  assert.equal(room.pendingMoveDeadlineAt, 16_000);
+
+  // A non-reroll move passes the turn and re-arms for the next player.
+  rollForCurrentPlayer(room, 2, 7_000);
+  const second = submitPendingMoveForRoom(room, 0, 8_000);
+  assert.equal(second.ok, true);
+  syncTurnDeadline(room, 8_000);
+  assert.equal(room.gameState.currentPlayer, 1);
+  assert.equal(room.pendingMoveDeadlineAt, 23_000);
+});
+
+test("bot turns do not get a deadline", () => {
+  const state = makeTwoPlayerState();
+  state.currentPlayer = 1;
+  const room = makeRoom(state, { turnTimeLimitSeconds: 15 });
+  room.players[1].isBot = true;
+
+  syncTurnDeadline(room, 1_000);
   assert.equal(room.pendingMoveDeadlineAt, null);
 });
 
-test("roll with no moves does not create deadline", () => {
+test("roll with no moves schedules the delayed advance", () => {
   const state = makeTwoPlayerState();
   state.marbles
     .filter((m) => m.player === 0)
@@ -81,7 +107,6 @@ test("roll with no moves does not create deadline", () => {
   const moves = rollForCurrentPlayer(room, 2, 1_000);
 
   assert.equal(moves.length, 0);
-  assert.equal(room.pendingMoveDeadlineAt, null);
   assert.equal(room.noMoveAdvanceAt, 1_000 + NO_MOVE_DIE_DISPLAY_MS + NO_MOVE_NOTICE_MS);
   assert.equal(room.gameState.currentPlayer, 0);
   assert.equal(room.gameState.pendingDieValue, 2);
@@ -115,7 +140,8 @@ test("expired deadline submits first pending move", () => {
   state.marbles[0].place = PLACE.TRACK;
   state.marbles[0].progress = 0;
   const room = makeRoom(state, { turnTimeLimitSeconds: 15 });
-  rollForCurrentPlayer(room, 2, 1_000);
+  syncTurnDeadline(room, 1_000);
+  rollForCurrentPlayer(room, 2, 2_000);
 
   const result = continueTimedOutAutoPlay(room, 16_001, () => 3);
 
@@ -129,7 +155,8 @@ test("expired deadline submits first pending move", () => {
 
 test("timeout auto-continues reroll chain without a second delay", () => {
   const room = makeRoom(makeTwoPlayerState(), { turnTimeLimitSeconds: 15 });
-  rollForCurrentPlayer(room, 6, 1_000);
+  syncTurnDeadline(room, 1_000);
+  rollForCurrentPlayer(room, 6, 2_000);
 
   const result = continueTimedOutAutoPlay(room, 16_001, () => 2);
 
@@ -137,5 +164,20 @@ test("timeout auto-continues reroll chain without a second delay", () => {
   assert.equal(room.gameState.currentPlayer, 1);
   assert.equal(room.pendingMoves, null);
   assert.equal(room.pendingMoveDeadlineAt, null);
+  assert.equal(room.timedOutAutoPlayer, null);
+});
+
+test("expired deadline rolls and plays for a player who never rolled", () => {
+  const room = makeRoom(makeTwoPlayerState(), { turnTimeLimitSeconds: 30 });
+  syncTurnDeadline(room, 1_000);
+  assert.equal(room.pendingMoveDeadlineAt, 31_000);
+
+  const rolls = [6, 2];
+  const result = continueTimedOutAutoPlay(room, 31_001, () => rolls.shift() ?? 2);
+
+  assert.equal(result.changed, true);
+  assert.equal(room.gameState.marbles[0].place, PLACE.TRACK);
+  assert.equal(room.gameState.marbles[0].progress, 2);
+  assert.equal(room.gameState.currentPlayer, 1);
   assert.equal(room.timedOutAutoPlayer, null);
 });

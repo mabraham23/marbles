@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=21" />
+    <link rel="stylesheet" href="styles.css?v=22" />
   </head>
   <body>
     <div id="connPill" class="conn-pill" data-state="connecting" hidden>Connecting…</div>
@@ -71,12 +71,10 @@
             <div class="rules-flow-demo" aria-hidden="true">
               <div class="rules-dice-demo">4</div>
               <div class="rules-options-demo">
-                <span>K1 moves 4</span>
-                <span class="active">K2 moves 4</span>
-                <span>K3 enters finish</span>
+                <span class="active">Tap a highlighted spot</span>
               </div>
             </div>
-            <p>On your turn, roll the dice. If moves are available, choose one highlighted board spot or one move from the list.</p>
+            <p>On your turn, roll the dice. If moves are available, tap one of the highlighted spots on the board.</p>
           </section>
 
           <section class="rules-item">
@@ -105,6 +103,17 @@
         </div>
 
         <button id="rulesGotItBtn" class="primary-button" type="button">Got it</button>
+      </div>
+    </div>
+    <div id="adminModal" class="modal-overlay" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="adminModalTitle">
+        <h2 id="adminModalTitle">Admin controls</h2>
+        <p class="admin-modal-note">These affect everyone in the game.</p>
+        <div class="admin-modal-actions">
+          <button class="secondary-button" id="resetGameButton" type="button">Reset game</button>
+          <button class="secondary-button" id="endGameButton" type="button">End game</button>
+        </div>
+        <button id="adminModalCloseBtn" class="primary-button" type="button">Back to game</button>
       </div>
     </div>
     <main class="app-shell">
@@ -184,18 +193,19 @@
       <section id="lobbyView" class="card" hidden>
         <header class="lobby-header">
           <div class="lobby-header-row">
-            <div>
-              <h1 class="title">Lobby</h1>
-              <p class="subtitle">Code: <strong id="lobbyCodeLabel">—</strong></p>
-            </div>
+            <h1 class="title">Lobby</h1>
             <div id="lobbyAudioControls" class="header-audio-controls" aria-label="Audio controls"></div>
           </div>
-          <button id="copyLinkBtn" class="secondary-button" type="button">Copy invite link</button>
+          <div class="lobby-header-row lobby-code-row">
+            <p class="subtitle">Code: <strong id="lobbyCodeLabel">—</strong></p>
+            <button id="copyLinkBtn" class="secondary-button" type="button">Copy invite link</button>
+          </div>
         </header>
         <div id="lobbyFeeBanner" class="fee-banner" hidden></div>
         <div id="lobbyFeeEditor" class="lobby-fee-editor" hidden>
-          <label class="fee-field">
-            <span>Entry fee per player (optional)</span>
+          <button id="feeRevealBtn" class="fee-reveal" type="button">+ Add entry fee (optional)</button>
+          <label class="fee-field" id="feeFieldRow" hidden>
+            <span>Entry fee per player</span>
             <span class="fee-input-wrap">
               <span class="fee-prefix">$</span>
               <input id="lobbyFeeInput" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
@@ -215,7 +225,6 @@
         </form>
         <ol id="playerList" class="lobby-list"></ol>
         <div id="modePicker" class="mode-picker"></div>
-        <div id="timeLimitPicker" class="mode-picker time-limit-picker"></div>
         <div class="lobby-actions">
           <button id="leaveBtn" class="secondary-button" type="button">Leave</button>
           <button id="startBtn" class="primary-button" type="button" hidden>Start game</button>
@@ -226,13 +235,13 @@
       <section id="teamStagingView" class="card team-staging" hidden>
         <header class="lobby-header">
           <div class="lobby-header-row">
-            <div>
-              <h1 class="title">Review Teams</h1>
-              <p class="subtitle">Code: <strong id="stagingCodeLabel">—</strong></p>
-            </div>
+            <h1 class="title">Review Teams</h1>
             <div id="stagingAudioControls" class="header-audio-controls" aria-label="Audio controls"></div>
           </div>
-          <button id="stagingBackBtn" class="secondary-button" type="button" hidden>Back to lobby</button>
+          <div class="lobby-header-row lobby-code-row">
+            <p class="subtitle">Code: <strong id="stagingCodeLabel">—</strong></p>
+            <button id="stagingBackBtn" class="secondary-button" type="button" hidden>Back to lobby</button>
+          </div>
         </header>
         <p class="team-staging-copy">The game will start shortly. Check your team and colors.</p>
         <div id="stagingTeams" class="team-card-list"></div>
@@ -248,7 +257,10 @@
       <!-- GAME VIEW -->
       <section id="gameView" hidden>
         <div class="game-top-controls">
-          <button class="help-button" id="howToPlayButton" type="button" aria-haspopup="dialog">How to play</button>
+          <div class="game-top-left">
+            <button class="help-button" id="howToPlayButton" type="button" aria-haspopup="dialog">How to play</button>
+            <button class="help-button admin-menu-button" id="adminMenuButton" type="button" aria-haspopup="dialog" hidden>Admin</button>
+          </div>
           <div id="gameAudioControls" class="game-audio-controls" aria-label="Audio controls">
             <button id="soundToggleBtn" class="audio-toggle-button sound-toggle-button" type="button" aria-label="Toggle sound effects" hidden>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -337,19 +349,6 @@
             <span id="turnTimerChip" class="turn-timer-chip" hidden></span>
             <button class="dice-button" id="rollButton" type="button" aria-label="Roll dice"></button>
           </div>
-          <div class="moves" id="movesPanel" aria-live="polite"></div>
-          <div id="gameCommsControls" class="game-comms-controls" aria-label="Chat controls"></div>
-          <details class="game-details">
-            <summary>Game info</summary>
-            <div class="status" id="statusPanel"></div>
-          </details>
-          <details class="game-details admin-game-details" id="adminGameDetails" hidden>
-            <summary>Admin controls</summary>
-            <section class="admin-game-actions" id="adminGameActions" aria-label="Admin game controls">
-              <button class="secondary-button" id="resetGameButton" type="button">Reset game</button>
-              <button class="secondary-button" id="endGameButton" type="button">End game</button>
-            </section>
-          </details>
         </section>
       </section>
     </main>
@@ -406,6 +405,6 @@
     <!-- Hidden container for per-peer remote audio elements -->
     <div id="voiceAudioContainer" hidden aria-hidden="true"></div>
 
-    <script type="module" src="client.js?v=23"></script>
+    <script type="module" src="client.js?v=24"></script>
   </body>
 </html>
