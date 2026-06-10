@@ -6,6 +6,16 @@ Use this when a Codex agent needs to run Marbles locally and drive it in the Cod
 
 This file is the central source of truth for agent-run Marbles setup, browser simulation, and local port safety. If another note or README gives a shorter local-start command, follow this file for agent work.
 
+### Dev gotchas (read first)
+
+- **Restart the server after editing `server/`.** Static assets (`public/*.js`, `.css`, `.html`) are read from disk per request, so client/CSS/HTML edits show up on a plain page reload. But `server/server.js` (and its imports like `turn-timeout.js`, `room-lifecycle.js`) run in the live Node process — a new route/handler (e.g. a new WS message type) does nothing until you restart the server. Symptom: the client sends a message and nothing happens / the room state never updates.
+- **Rooms persist in Redis, sockets don't.** With Upstash configured, room state survives a server restart, but every WebSocket drops — reload the tab and re-enter your name to rejoin. Completed games are GC'd ~5 min after they end (`COMPLETED_ROOM_TTL_MS` in `room-lifecycle.js`), so a finished room left open will show "Game ended" shortly after.
+- **CSS source order can defeat media queries.** Several controls (`.chat-toggle-button`, `.voice-toggle-button`, `.audio-toggle-button`) are `position: fixed` with a base rule plus a `@media (max-width: 640px)` override. If a base rule is written *after* its media query, the base wins at all widths (same specificity, later source) and the override silently does nothing. When two fixed buttons look misaligned, check computed `right`/`bottom` in DevTools, not just the CSS you intended. Prefer putting the full responsive value (`max(20px, env(safe-area-inset-right))`) in the base rule.
+- **The control buttons live at fixed viewport corners on every room view** (lobby/staging/game): sound+music top-right, chat+voice bottom-right, all sharing one 20px right-edge column. They're re-parented to `<body>` in `showView()` so they aren't trapped inside a hidden view. Don't dock them back into per-view headers — that reintroduces cross-screen misalignment.
+- **Move list is pre-ranked.** `rollForCurrentPlayer` returns `rankMoves(...)` sorted best→worst, so `room.pendingMoves[0]` is always the heuristic's top move. Computer players just submit index 0; improving `scoreMove`/`MOVE_SCORE_WEIGHTS` (see the tuning notes in `public/shared/rules.js`) improves bots and the human move-list ordering together.
+- **Computer players:** admin adds them in the lobby (`addBot`/`removeBot`, names "Computer N"); `driveBotTurn` in the sweep auto-plays bot seats (~1s/action). Bots skip the Venmo requirement and fee+bot is blocked. Great for testing a full game without WS helpers — add bots, start, and watch.
+- **Driving the create→name→Continue flow in a browser is finicky** (stale element refs after navigation; a password-manager overlay can sit over the Continue button). Click step-by-step with fresh `find`s rather than one big batch, and click the visible button by coordinate if a ref goes stale.
+
 ### Server
 
 - Check for an existing local server with `lsof -nP -iTCP:3000 -sTCP:LISTEN`.
