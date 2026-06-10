@@ -14,6 +14,7 @@ import {
   PLACE,
   marbleToken,
   playerDone,
+  getWinningPlayers,
 } from "./shared/rules.js";
 
 import { Sound } from "./sounds.js?v=3";
@@ -88,6 +89,19 @@ const winOverlayText = document.querySelector("#winOverlayText");
 const winRematchBtn = document.querySelector("#winRematchButton");
 const winLobbyBtn = document.querySelector("#winLobbyButton");
 const winWaitingNote = document.querySelector("#winWaitingNote");
+const seeStatsButton = document.querySelector("#seeStatsButton");
+const signBoardButton = document.querySelector("#signBoardButton");
+const statsModal = document.querySelector("#statsModal");
+const statsContent = document.querySelector("#statsContent");
+const statsCloseBtn = document.querySelector("#statsCloseBtn");
+const boardFlipper = document.querySelector("#boardFlipper");
+const signatureListEl = document.querySelector("#signatureList");
+const signBoardConfirmBtn = document.querySelector("#signBoardConfirmBtn");
+const boardBackReturnBtn = document.querySelector("#boardBackReturnBtn");
+const wallModal = document.querySelector("#wallModal");
+const wallSignatureList = document.querySelector("#wallSignatureList");
+const wallCloseBtn = document.querySelector("#wallCloseBtn");
+const homeFlipBtn = document.querySelector("#homeFlipBtn");
 const boardShape = document.querySelector("#boardShape");
 const boardClipShape = document.querySelector("#boardClipShape");
 const woodLayer = document.querySelector("#woodLayer");
@@ -145,7 +159,26 @@ const ui = {
   settlement: null,      // { pot, perWinnerShare, transfers }
   pendingHandle: null,   // String handle user just typed; resent on auto-rejoin
   handleRequired: false, // Server told us this room needs a handle (before we know the fee)
+  signatures: null,      // global winners wall: [{ name, tallies, firstSignedAt }]
+  youSigned: false,      // local player already signed for this game
+  boardFlipped: false,   // board is showing its back (signature wall)
+  lastSignedName: null,  // pulse this signature row after we sign
 };
+
+// Stable per-device identity for the board-signature wall — survives across
+// games and sessions so repeat wins add tallies to the same signature.
+function getPlayerId() {
+  try {
+    let id = localStorage.getItem("marblesPlayerId");
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem("marblesPlayerId", id);
+    }
+    return id;
+  } catch {
+    return null;
+  }
+}
 
 let diceSpinTimer = null;
 let diceSpinValue = 1;
@@ -170,6 +203,13 @@ function showView(name) {
     settlementPanel.hidden = true;
   }
   if (adminModal && name !== "game") adminModal.hidden = true;
+  if (name !== "game") {
+    if (statsModal) statsModal.hidden = true;
+    if (ui.boardFlipped) {
+      ui.boardFlipped = false;
+      boardFlipper?.classList.remove("flipped");
+    }
+  }
   if (name === "name") {
     nameForm.hidden = false;
     document.querySelector("#homeChoices").hidden = true;
@@ -315,6 +355,7 @@ function connect() {
         code: ui.roomCode,
         name: ui.myName,
         adminToken: loadAdminToken(ui.roomCode) || undefined,
+        playerId: getPlayerId() || undefined,
       };
       if (ui.pendingHandle) payload.venmoHandle = ui.pendingHandle;
       sock.send(JSON.stringify(payload));
@@ -444,6 +485,10 @@ function handleServerMessage(msg) {
       ui.playerHandles = msg.playerHandles || {};
       ui.settlement = msg.settlement || null;
       ui.botNames = new Set(msg.botNames || []);
+      ui.youSigned = Boolean(msg.youSigned);
+      // A new game started while the board back was showing (e.g. rematch).
+      if (!state.gameOver && ui.boardFlipped) flipBoardTo(false);
+      updateSignConfirmButton();
       const wasLobby = ui.view === "lobby";
       if (ui.view !== "game") showView("game");
 
@@ -461,6 +506,11 @@ function handleServerMessage(msg) {
       break;
     case "chatHistory":
       handleChatHistory(msg.chat);
+      break;
+    case "boardSignatures":
+      ui.signatures = msg.signatures || [];
+      renderSignatures();
+      updateSignConfirmButton();
       break;
     case "voicePeers":
       // We just joined voice; open a connection to each existing participant.
@@ -617,7 +667,7 @@ $on(nameForm, "submit", (e) => {
   if (!ui.roomCode) { showError("No room code"); return; }
   let adminToken = null;
   try { adminToken = localStorage.getItem(`adminToken:${ui.roomCode}`) || undefined; } catch {}
-  const payload = { type: "joinRoom", code: ui.roomCode, name, adminToken };
+  const payload = { type: "joinRoom", code: ui.roomCode, name, adminToken, playerId: getPlayerId() || undefined };
   if (venmoInput && venmoInput.value.trim()) {
     const normalized = normalizeHandleClient(venmoInput.value);
     if (!normalized) {
@@ -1056,6 +1106,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (rulesModal && !rulesModal.hidden) closeRulesModal();
   if (adminModal && !adminModal.hidden) adminModal.hidden = true;
+  if (statsModal && !statsModal.hidden) statsModal.hidden = true;
+  if (wallModal && !wallModal.hidden) wallModal.hidden = true;
 });
 
 function teamPlayerChipHTML(player, { compact = false, currentPlayerIndex = null, finishedByPlayer = null } = {}) {
@@ -1751,6 +1803,11 @@ function pulseLastMove(point, seat) {
   setTimeout(() => ring.remove(), 1500);
 }
 
+function localIsWinner(state) {
+  const lp = localPlayerIdx();
+  return lp != null && lp >= 0 && getWinningPlayers(state).includes(lp);
+}
+
 function renderWinOverlay(state) {
   if (!winOverlay || !winOverlayText) return;
   if (!state?.gameOver || !state.winner) {
@@ -1760,15 +1817,171 @@ function renderWinOverlay(state) {
   const winnerIdx = state.playerNames.indexOf(state.winner);
   const seat = winnerIdx >= 0 ? state.seatColors[winnerIdx] : null;
   winOverlayText.textContent = `${state.winner} wins!`;
-  winOverlayText.style.color = seat != null ? PLAYER_COLORS[seat] : "var(--accent-strong)";
+  // Black's player color is invisible on the dark card — same readability
+  // swap the chat sender names use.
+  winOverlayText.style.color = seat != null ? getChatSenderColorForSeat(seat) : "var(--accent-strong)";
+  if (signBoardButton) {
+    signBoardButton.hidden = !localIsWinner(state);
+    signBoardButton.textContent = ui.youSigned ? "View the board back" : "Sign the board";
+  }
   if (winRematchBtn) winRematchBtn.hidden = !ui.isAdmin;
   if (winLobbyBtn) winLobbyBtn.hidden = !ui.isAdmin;
   if (winWaitingNote) {
     winWaitingNote.hidden = ui.isAdmin;
     winWaitingNote.textContent = "Waiting for the host to start the next game…";
   }
-  winOverlay.hidden = false;
+  // While the board back is showing, the overlay stays out of the way.
+  winOverlay.hidden = Boolean(ui.boardFlipped);
 }
+
+// --- Board back (global winners wall) ---
+
+function updateSignConfirmButton() {
+  if (!signBoardConfirmBtn) return;
+  const canSign = Boolean(ui.game?.gameOver && ui.game.winner && localIsWinner(ui.game) && !ui.youSigned);
+  signBoardConfirmBtn.hidden = !canSign;
+  if (canSign) {
+    signBoardConfirmBtn.disabled = false;
+    signBoardConfirmBtn.textContent = ui.signatures?.some((s) => s.name === ui.myName)
+      ? "Add my tally"
+      : "Sign the board";
+  }
+}
+
+function flipBoardTo(back) {
+  ui.boardFlipped = back;
+  if (boardFlipper) boardFlipper.classList.toggle("flipped", back);
+  if (back) {
+    send({ type: "getBoardSignatures" });
+    renderSignatures();
+    updateSignConfirmButton();
+  }
+  if (ui.game) renderWinOverlay(ui.game);
+}
+
+function renderSignatures() {
+  const sigs = ui.signatures;
+  for (const el of [signatureListEl, wallSignatureList]) {
+    if (!el) continue;
+    el.replaceChildren();
+    // The wall fills up over the years: shrink the ink, then go two-column,
+    // and finally scroll, so it keeps looking like a board and not a spreadsheet.
+    const count = sigs?.length || 0;
+    el.dataset.density = count > 18 ? "dense" : count > 8 ? "compact" : "roomy";
+    if (!sigs || sigs.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "signature-empty";
+      empty.textContent = sigs ? "No champions yet — win a game and sign the board!" : "Flipping the board over…";
+      el.append(empty);
+      continue;
+    }
+    sigs.forEach((sig) => {
+      const row = document.createElement("div");
+      row.className = "signature-row";
+      if (sig.name === ui.lastSignedName) row.classList.add("just-signed");
+      const name = document.createElement("span");
+      name.className = "signature-name";
+      name.textContent = sig.name;
+      const tallies = document.createElement("span");
+      tallies.className = "signature-tallies";
+      let remaining = sig.tallies;
+      while (remaining > 0) {
+        const strokes = Math.min(5, remaining);
+        const group = document.createElement("span");
+        group.className = `tally-group tally-${strokes}`;
+        for (let i = 0; i < strokes; i += 1) group.append(document.createElement("i"));
+        tallies.append(group);
+        remaining -= strokes;
+      }
+      row.append(name, tallies);
+      el.append(row);
+    });
+  }
+}
+
+$on(signBoardButton, "click", () => flipBoardTo(true));
+$on(boardBackReturnBtn, "click", () => flipBoardTo(false));
+$on(signBoardConfirmBtn, "click", () => {
+  if (!ui.game?.gameOver) return;
+  ui.lastSignedName = ui.myName;
+  signBoardConfirmBtn.disabled = true;
+  Sound.play("click");
+  send({ type: "signBoard" });
+});
+
+$on(homeFlipBtn, "click", () => {
+  ui.signatures = ui.signatures || null;
+  send({ type: "getBoardSignatures" });
+  renderSignatures();
+  if (wallModal) wallModal.hidden = false;
+});
+$on(wallCloseBtn, "click", () => { if (wallModal) wallModal.hidden = true; });
+$on(wallModal, "click", (event) => {
+  if (event.target === wallModal) wallModal.hidden = true;
+});
+
+// --- Post-game stats ---
+
+function renderStatsModal() {
+  const state = ui.game;
+  if (!statsContent || !state) return;
+  const stats = state.stats;
+  if (!stats) {
+    statsContent.innerHTML = '<p class="stats-empty">No stats were tracked for this game.</p>';
+    return;
+  }
+  const marblesHome = state.playerNames.map((_, p) =>
+    state.marbles.filter((m) => m.player === p && m.place === PLACE.FINISH).length);
+  const winners = new Set(state.gameOver && state.winner ? getWinningPlayers(state) : []);
+
+  const headerRow =
+    '<div class="stats-row stats-head"><span class="stats-name"></span>' +
+    '<span title="Captures made">🔥</span><span title="Times captured">💀</span>' +
+    '<span title="Marbles home">🏁</span><span title="Sixes rolled">⚅</span>' +
+    '<span title="Center takes">🎯</span><span title="Longest turn (rolls in one turn)">🔁</span></div>';
+
+  const playerRow = (p) => {
+    const s = stats.players[p] || {};
+    const seat = state.seatColors[p];
+    const first = stats.firstHome?.player === p
+      ? ' <span class="stats-first" title="First marble home">⭐</span>'
+      : "";
+    return (
+      `<div class="stats-row${winners.has(p) ? " stats-winner" : ""}">` +
+        `<span class="stats-name"><span class="team-color-dot" style="background:${PLAYER_COLORS[seat]};border-color:${PLAYER_STROKES[seat]}"></span>${escapeHTML(state.playerNames[p])}${first}</span>` +
+        `<span>${s.captures ?? 0}</span><span>${s.captured ?? 0}</span><span>${marblesHome[p]}</span>` +
+        `<span>${s.sixes ?? 0}</span><span>${s.centerTakes ?? 0}</span><span>${s.bestTurn ?? 0}</span>` +
+      `</div>`
+    );
+  };
+
+  let html = headerRow;
+  const groups = teamDisplayGroups({ playerNames: state.playerNames, mode: state.mode });
+  if (groups.length) {
+    groups.forEach((group) => {
+      const idxs = group.players.map((player) => player.playerIndex);
+      const total = (key) => idxs.reduce((sum, p) => sum + (stats.players[p]?.[key] ?? 0), 0);
+      const totalHome = idxs.reduce((sum, p) => sum + marblesHome[p], 0);
+      html +=
+        `<div class="stats-team-row"><span class="stats-name">${escapeHTML(group.label)}</span>` +
+        `<span>${total("captures")}</span><span>${total("captured")}</span><span>${totalHome}</span>` +
+        `<span>${total("sixes")}</span><span>${total("centerTakes")}</span><span></span></div>`;
+      idxs.forEach((p) => { html += playerRow(p); });
+    });
+  } else {
+    state.playerNames.forEach((_, p) => { html += playerRow(p); });
+  }
+  statsContent.innerHTML = html;
+}
+
+$on(seeStatsButton, "click", () => {
+  renderStatsModal();
+  if (statsModal) statsModal.hidden = false;
+});
+$on(statsCloseBtn, "click", () => { if (statsModal) statsModal.hidden = true; });
+$on(statsModal, "click", (event) => {
+  if (event.target === statsModal) statsModal.hidden = true;
+});
 
 function showCaptureFlare(lastMove) {
   if (!captureFlare || !captureFlareText || !ui.game || lastMove.bumpedIdx == null) return;

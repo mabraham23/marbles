@@ -14,7 +14,10 @@ import {
   assignSeats,
   validModes,
   createInitialState,
+  getWinningPlayers,
 } from "../public/shared/rules.js";
+
+import { SIGNATURES_KEY, applySignature, signatureList } from "./signatures.js";
 
 import { roomStore } from "./storage.js";
 import {
@@ -263,6 +266,10 @@ function gameStatePayloadFor(room, recipientName) {
   if (room.settlement) payload.settlement = room.settlement;
   const botNames = room.players.filter((p) => p.isBot).map((p) => p.name);
   if (botNames.length) payload.botNames = botNames;
+  // Whether this recipient already signed the board for this game (player ids
+  // themselves are never sent to other clients).
+  const recipientId = room.playerIds?.[recipientName];
+  payload.youSigned = Boolean(recipientId && room.signedBy?.includes(recipientId));
   return payload;
 }
 
@@ -312,6 +319,12 @@ async function handleJoinRoom(socket, msg) {
   const code = typeof msg.code === "string" ? msg.code.toUpperCase().trim() : "";
   const rawName = typeof msg.name === "string" ? msg.name.trim() : "";
   const adminToken = typeof msg.adminToken === "string" ? msg.adminToken : null;
+  // Stable per-device id (localStorage) used to identify a player across
+  // games for the board-signature winners wall.
+  const playerId =
+    typeof msg.playerId === "string" && msg.playerId.length > 0 && msg.playerId.length <= 64
+      ? msg.playerId
+      : null;
 
   if (!code) return sendError(socket, "Missing room code");
   if (!rawName) return sendError(socket, "Name required");
@@ -389,6 +402,11 @@ async function handleJoinRoom(socket, msg) {
     if (incomingHandle) {
       room.playerHandles = room.playerHandles || {};
       room.playerHandles[name] = { ...(room.playerHandles[name] || {}), venmo: incomingHandle };
+    }
+
+    if (playerId) {
+      room.playerIds = room.playerIds || {};
+      room.playerIds[name] = playerId;
     }
 
     // Attach socket properties
@@ -598,6 +616,7 @@ async function handleStartGame(socket) {
   room.noMoveAdvanceAt = null;
   room.timedOutAutoPlayer = null;
   room.settlement = null;
+  room.signedBy = [];
   room.lastMoveAt = Date.now();
   room.completedAt = null;
   syncTurnDeadline(room, room.lastMoveAt);
@@ -656,6 +675,7 @@ async function handleResetGame(socket) {
   room.noMoveAdvanceAt = null;
   room.timedOutAutoPlayer = null;
   room.settlement = null;
+  room.signedBy = [];
   room.lastMoveAt = Date.now();
   room.completedAt = null;
   syncTurnDeadline(room, room.lastMoveAt);
@@ -779,6 +799,47 @@ async function handleMarkReceived(socket, msg) {
   await broadcastGame(room);
 }
 
+// ---------- Board signatures (global winners wall) ----------
+
+async function sendBoardSignatures(socket) {
+  const signatures = (await roomStore.getGlobal(SIGNATURES_KEY)) || {};
+  safeSend(socket, { type: "boardSignatures", signatures: signatureList(signatures) });
+}
+
+// Viewable by anyone, even outside a room (home-screen board flip).
+async function handleGetBoardSignatures(socket) {
+  await sendBoardSignatures(socket);
+}
+
+async function handleSignBoard(socket) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room, name } = found;
+  const state = room.gameState;
+  if (room.phase !== "playing" || !state?.gameOver || !state.winner) {
+    return sendError(socket, "The game isn't over yet");
+  }
+  const winnerNames = getWinningPlayers(state).map((idx) => state.playerNames[idx]);
+  if (!winnerNames.includes(name)) return sendError(socket, "Only winners sign the board");
+  const playerId = room.playerIds?.[name];
+  if (!playerId) return sendError(socket, "Couldn't identify you to sign the board");
+  room.signedBy = room.signedBy || [];
+  if (room.signedBy.includes(playerId)) return sendError(socket, "You already signed for this win");
+
+  const signatures = (await roomStore.getGlobal(SIGNATURES_KEY)) || {};
+  const next = applySignature(signatures, playerId, name, Date.now());
+  await roomStore.setGlobal(SIGNATURES_KEY, next);
+  room.signedBy.push(playerId);
+  await roomStore.set(room.code, room);
+
+  // Everyone in the room sees the fresh wall; the signer also gets the
+  // youSigned flag via the game broadcast.
+  const payload = { type: "boardSignatures", signatures: signatureList(next) };
+  const conn = pruneRoomConnections(room.code);
+  for (const s of conn.socketsByName.values()) safeSend(s, payload);
+  await broadcastGame(room);
+}
+
 async function handleChat(socket, msg) {
   const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
@@ -888,6 +949,8 @@ async function handleMessage(socket, raw) {
       case "updateHandle":   return await handleUpdateHandle(socket, msg);
       case "markSent":       return await handleMarkSent(socket, msg);
       case "markReceived":   return await handleMarkReceived(socket, msg);
+      case "signBoard":      return await handleSignBoard(socket);
+      case "getBoardSignatures": return await handleGetBoardSignatures(socket);
       case "chat":           return await handleChat(socket, msg);
       case "voiceJoin":      return await handleVoiceJoin(socket);
       case "voiceLeave":     return await handleVoiceLeave(socket);

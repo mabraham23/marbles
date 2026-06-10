@@ -15,6 +15,7 @@ const TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const FORCE_MEMORY = process.env.ROOM_STORE === "memory";
 
 const ROOM_KEY_PREFIX = "room:";
+const GLOBAL_KEY_PREFIX = "global:";
 const TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
 class RedisRoomStore {
@@ -77,11 +78,32 @@ class RedisRoomStore {
       return [];
     }
   }
+
+  // Permanent (no TTL) global values, e.g. the board-signature winners wall.
+  async getGlobal(key) {
+    try {
+      const data = await this.client.get(GLOBAL_KEY_PREFIX + key);
+      if (!data) return null;
+      return typeof data === "string" ? JSON.parse(data) : data;
+    } catch (err) {
+      console.error(`RoomStore error fetching global ${key}:`, err);
+      return null;
+    }
+  }
+
+  async setGlobal(key, value) {
+    try {
+      await this.client.set(GLOBAL_KEY_PREFIX + key, JSON.stringify(value));
+    } catch (err) {
+      console.error(`RoomStore error saving global ${key}:`, err);
+    }
+  }
 }
 
 class MemoryRoomStore {
   constructor() {
     this.map = new Map();
+    this.globals = new Map();
     console.log("RoomStore: Using local in-memory fallback storage (no Redis URL detected)");
   }
 
@@ -107,6 +129,15 @@ class MemoryRoomStore {
 
   async list() {
     return Array.from(this.map.values()).map((r) => JSON.parse(JSON.stringify(r)));
+  }
+
+  async getGlobal(key) {
+    const value = this.globals.get(key);
+    return value ? JSON.parse(JSON.stringify(value)) : null;
+  }
+
+  async setGlobal(key, value) {
+    this.globals.set(key, JSON.parse(JSON.stringify(value)));
   }
 }
 

@@ -683,3 +683,45 @@ test("rollAndCompute returns moves in non-increasing score order", () => {
     );
   }
 });
+
+test("stats: rolls, sixes, reroll chains, captures, center and first home", () => {
+  const state = createInitialState({ playerCount: 2, mode: MODES.SINGLE, playerNames: ["A", "B"] });
+
+  // A rolls 6, leaves home, rolls again (2) and moves — one turn, two rolls.
+  let moves = rollAndCompute(state, 6);
+  applyMove(state, moves.find((m) => m.label.includes("leaves home")), 6);
+  moves = rollAndCompute(state, 2);
+  applyMove(state, moves[0], 2);
+
+  const a = state.stats.players[0];
+  assert.equal(a.rolls, 2);
+  assert.equal(a.sixes, 1);
+  assert.equal(a.bestTurn, 2, "reroll chain counted as one turn");
+  assert.equal(state.turnRollCount, 0, "chain reset when the turn passed");
+
+  // B leaves home onto a hole occupied by A: a capture.
+  const aMarble = state.marbles.find((m) => m.player === 0 && m.place === PLACE.TRACK);
+  aMarble.progress = (state.starts[1] - state.starts[0] + TRACK_LEN) % TRACK_LEN; // B's start hole
+  assert.equal(state.currentPlayer, 1);
+  moves = rollAndCompute(state, 6);
+  applyMove(state, moves.find((m) => m.label.includes("leaves home")), 6);
+  assert.equal(state.stats.players[1].captures, 1);
+  assert.equal(state.stats.players[0].captured, 1);
+
+  // B takes the center on an exact roll.
+  moves = rollAndCompute(state, 6);
+  const center = moves.find((m) => m.targetPlace === PLACE.CENTER);
+  assert.ok(center, "center take available from progress 0 with a 6");
+  applyMove(state, center, 6);
+  assert.equal(state.stats.players[1].centerTakes, 1);
+
+  // First marble home is recorded once.
+  const bMarble = state.marbles.find((m) => m.player === 1 && m.place === PLACE.CENTER);
+  bMarble.place = PLACE.TRACK;
+  bMarble.progress = 82; // MAX_TRACK_PROGRESS
+  moves = rollAndCompute(state, 1);
+  const finish = moves.find((m) => m.targetPlace === PLACE.FINISH);
+  assert.ok(finish, "finish entry available");
+  applyMove(state, finish, 1);
+  assert.deepEqual(state.stats.firstHome.player, 1);
+});

@@ -152,6 +152,20 @@ export function createInitialState({ playerCount, mode, playerNames }) {
     gameOver: false,
     winner: null,
     lastMove: null,
+    // Per-game stats, shown after the game ends. Guarded with `if (state.stats)`
+    // everywhere so games created before this field existed keep working.
+    stats: {
+      players: Array.from({ length: playerCount }, () => ({
+        rolls: 0,
+        sixes: 0,
+        captures: 0,
+        captured: 0,
+        centerTakes: 0,
+        bestTurn: 0,
+      })),
+      firstHome: null, // { player, turnNumber } — first marble to reach a finish hole
+    },
+    turnRollCount: 0,
   };
 }
 
@@ -605,6 +619,7 @@ function nextPlayer(state) {
   // see the previous player's roll displayed as their own.
   state.pendingRoll = null;
   state.pendingDieValue = null;
+  state.turnRollCount = 0;
 }
 
 export function advanceNoMoveRoll(state, rollId = null) {
@@ -653,6 +668,24 @@ export function applyMove(state, move, roll) {
   movingMarble.progress = move.targetProgress ?? null;
   movingMarble.finish = move.targetFinish ?? null;
 
+  if (state.stats) {
+    const moverStats = state.stats.players[movingMarble.player];
+    if (bumpedIdx !== null) {
+      moverStats.captures += 1;
+      state.stats.players[state.marbles[bumpedIdx].player].captured += 1;
+    }
+    if (move.targetPlace === PLACE.CENTER) moverStats.centerTakes += 1;
+    // First marble of the game to reach a finish hole (slot shuffles within
+    // the finish don't count).
+    if (
+      move.targetPlace === PLACE.FINISH &&
+      beforeMarble.place !== PLACE.FINISH &&
+      !state.stats.firstHome
+    ) {
+      state.stats.firstHome = { player: movingMarble.player, turnNumber: state.turnNumber };
+    }
+  }
+
   const bumpedText =
     bumpedIdx !== null ? `, bumped ${marbleToken(state.marbles[bumpedIdx])} home` : "";
   state.log.unshift(`${move.label}${bumpedText} (rolled ${roll})`);
@@ -695,6 +728,13 @@ export function rollAndCompute(state, dieValue) {
   state.pendingDieValue = dieValue;
   state.pendingRoll = dieValue;
   state.noMoveRoll = null;
+  if (state.stats) {
+    const rollerStats = state.stats.players[state.currentPlayer];
+    rollerStats.rolls += 1;
+    if (dieValue === 6) rollerStats.sixes += 1;
+    state.turnRollCount = (state.turnRollCount || 0) + 1;
+    if (state.turnRollCount > rollerStats.bestTurn) rollerStats.bestTurn = state.turnRollCount;
+  }
   const moves = rankMoves(state, legalMoves(state, state.currentPlayer, dieValue), dieValue);
   if (moves.length === 0) {
     state.log.unshift(
