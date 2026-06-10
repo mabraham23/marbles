@@ -36,13 +36,18 @@ const gameView = document.querySelector("#gameView");
 const errorBanner = document.querySelector("#errorBanner");
 
 const createBtn = document.querySelector("#createBtn");
-const entryFeeInput = document.querySelector("#entryFeeInput");
 const joinForm = document.querySelector("#joinForm");
 const joinCodeInput = document.querySelector("#joinCodeInput");
 const handleField = document.querySelector("#handleField");
 const handleFieldLabel = document.querySelector("#handleFieldLabel");
 const venmoInput = document.querySelector("#venmoInput");
 const lobbyFeeBanner = document.querySelector("#lobbyFeeBanner");
+const lobbyFeeEditor = document.querySelector("#lobbyFeeEditor");
+const lobbyFeeInput = document.querySelector("#lobbyFeeInput");
+const lobbyPotNote = document.querySelector("#lobbyPotNote");
+const lobbyVenmoPrompt = document.querySelector("#lobbyVenmoPrompt");
+const lobbyVenmoInput = document.querySelector("#lobbyVenmoInput");
+const lobbyVenmoLabel = document.querySelector("#lobbyVenmoLabel");
 const settlementPanel = document.querySelector("#settlementPanel");
 const LAST_VENMO_KEY = "lastVenmoHandle";
 const ROOM_CODE_LENGTH = 4;
@@ -76,6 +81,11 @@ const stagingStartBtn = document.querySelector("#stagingStartBtn");
 const board = document.querySelector("#board");
 const captureFlare = document.querySelector("#captureFlare");
 const captureFlareText = document.querySelector("#captureFlareText");
+const winOverlay = document.querySelector("#winOverlay");
+const winOverlayText = document.querySelector("#winOverlayText");
+const winRematchBtn = document.querySelector("#winRematchButton");
+const winLobbyBtn = document.querySelector("#winLobbyButton");
+const winWaitingNote = document.querySelector("#winWaitingNote");
 const boardShape = document.querySelector("#boardShape");
 const boardClipShape = document.querySelector("#boardClipShape");
 const woodLayer = document.querySelector("#woodLayer");
@@ -169,11 +179,10 @@ function showView(name) {
   const chatToggleBtn = document.querySelector("#chatToggleBtn");
   const chatDrawer = document.querySelector("#chatDrawer");
   const voiceToggleBtn = document.querySelector("#voiceToggleBtn");
-  if (chatToggleBtn && voiceToggleBtn && gameCommsControls) {
-    const desiredParent = name === "game" ? gameCommsControls : document.body;
-    if (chatToggleBtn.parentElement !== desiredParent) desiredParent.append(chatToggleBtn);
-    if (voiceToggleBtn.parentElement !== desiredParent) desiredParent.append(voiceToggleBtn);
-  }
+  // Chat + voice float fixed in the bottom-right corner on every room view
+  // (lobby, staging, game) so they stay in one consistent, always-visible spot.
+  if (chatToggleBtn && chatToggleBtn.parentElement !== document.body) document.body.append(chatToggleBtn);
+  if (voiceToggleBtn && voiceToggleBtn.parentElement !== document.body) document.body.append(voiceToggleBtn);
   const roomView = name === "lobby" || name === "staging" || name === "game";
   if (roomView) {
     if (chatToggleBtn) chatToggleBtn.hidden = false;
@@ -188,8 +197,13 @@ function showView(name) {
     updateChatBadge();
   }
 
-  // Sound toggle is available in room views.
+  // Audio toggles float fixed in the top-right corner on every room view, so
+  // sound/music sit in one consistent spot (mirroring the bottom-right chat/
+  // voice FABs). Re-parent to <body> so they aren't trapped in a hidden view.
+  if (soundToggleBtn && soundToggleBtn.parentElement !== document.body) document.body.append(soundToggleBtn);
+  if (musicToggleBtn && musicToggleBtn.parentElement !== document.body) document.body.append(musicToggleBtn);
   if (soundToggleBtn) soundToggleBtn.hidden = !roomView;
+  if (musicToggleBtn) musicToggleBtn.hidden = !roomView;
 
   // Manage voice button visibility. Voice is available in room views.
   const voicePanel = document.querySelector("#voicePanel");
@@ -388,6 +402,7 @@ function handleServerMessage(msg) {
       ui.turnTimeLimitSeconds = msg.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
       ui.pendingMoveDeadlineAt = null;
       ui.playerHandles = msg.playerHandles || {};
+      ui.botNames = new Set((msg.players || []).filter((p) => p.isBot).map((p) => p.name));
       ui.settlement = null;
       if (ui.view !== "lobby") showView("lobby");
       renderLobby();
@@ -401,6 +416,7 @@ function handleServerMessage(msg) {
       ui.turnTimeLimitSeconds = msg.turnTimeLimitSeconds ?? DEFAULT_TURN_TIME_LIMIT_SECONDS;
       ui.pendingMoveDeadlineAt = null;
       ui.playerHandles = msg.playerHandles || {};
+      ui.botNames = new Set((msg.players || []).filter((p) => p.isBot).map((p) => p.name));
       ui.settlement = null;
       if (ui.view !== "staging") showView("staging");
       renderTeamStaging();
@@ -416,6 +432,7 @@ function handleServerMessage(msg) {
       ui.pendingMoveDeadlineAt = msg.pendingMoveDeadlineAt ?? null;
       ui.playerHandles = msg.playerHandles || {};
       ui.settlement = msg.settlement || null;
+      ui.botNames = new Set(msg.botNames || []);
       const wasLobby = ui.view === "lobby";
       if (ui.view !== "game") showView("game");
 
@@ -521,11 +538,32 @@ function applyHandleFieldVisibility() {
 
 // --- Home / Join flow ---
 $on(createBtn, "click", () => {
-  const rawFee = entryFeeInput && entryFeeInput.value.trim();
-  const feeNum = rawFee ? Number(rawFee) : 0;
-  const payload = { type: "createRoom" };
-  if (Number.isFinite(feeNum) && feeNum > 0) payload.entryFee = feeNum;
-  send(payload);
+  // Entry fee is now configured by the admin inside the lobby (setEntryFee),
+  // so room creation no longer carries a fee.
+  send({ type: "createRoom" });
+});
+
+// Lobby entry-fee editor (admin only). Sends on change/blur; blank clears it.
+function submitLobbyFee() {
+  if (!lobbyFeeInput || !ui.isAdmin) return;
+  const raw = lobbyFeeInput.value.trim();
+  const feeNum = raw ? Number(raw) : 0;
+  const entryFee = Number.isFinite(feeNum) && feeNum > 0 ? feeNum : null;
+  if ((ui.entryFee ?? null) === entryFee) return;
+  send({ type: "setEntryFee", entryFee });
+}
+$on(lobbyFeeInput, "change", submitLobbyFee);
+
+$on(lobbyVenmoPrompt, "submit", (event) => {
+  event.preventDefault();
+  if (!lobbyVenmoInput) return;
+  const normalized = normalizeHandleClient(lobbyVenmoInput.value);
+  if (!normalized) {
+    showError("Invalid Venmo handle");
+    return;
+  }
+  try { localStorage.setItem(LAST_VENMO_KEY, normalized); } catch { /* ignore */ }
+  send({ type: "updateHandle", venmoHandle: normalized });
 });
 
 function beginJoinWithCode(code) {
@@ -582,6 +620,19 @@ $on(copyLinkBtn, "click", async () => {
 
 $on(startBtn, "click", () => send({ type: "startGame" }));
 $on(stagingStartBtn, "click", () => send({ type: "startGame" }));
+
+// Add / remove computer players (delegated, admin-only buttons in the list).
+$on(playerListEl, "click", (event) => {
+  if (!ui.isAdmin) return;
+  if (event.target.closest(".add-bot")) {
+    send({ type: "addBot" });
+    return;
+  }
+  const removeBtn = event.target.closest(".bot-remove");
+  if (removeBtn) {
+    send({ type: "removeBot", botName: removeBtn.getAttribute("data-bot") });
+  }
+});
 $on(stagingBackBtn, "click", () => send({ type: "returnToLobby" }));
 $on(leaveBtn, "click", () => {
   const code = ui.roomCode;
@@ -821,7 +872,7 @@ function buildRulesDemo(kind) {
     bumpedPath,
     label,
     path,
-    viewBox: kind === "goal" ? "0 20 520 520" : demoViewBox(viewPoints),
+    viewBox: kind === "goal" ? "0 58 520 444" : demoViewBox(viewPoints),
   };
 }
 
@@ -982,11 +1033,18 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-function teamPlayerChipHTML(player, { compact = false, currentPlayerIndex = null } = {}) {
+function teamPlayerChipHTML(player, { compact = false, currentPlayerIndex = null, finishedByPlayer = null } = {}) {
   const youTag = player.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
   const currentTurn = compact && player.playerIndex === currentPlayerIndex;
   const turnIcon = currentTurn
     ? '<span class="turn-dice" aria-label="Current turn" title="Current turn"><span></span><span></span><span></span></span>'
+    : "";
+  const finished = finishedByPlayer?.[player.playerIndex];
+  const finishBadge = finished != null
+    ? `<span class="finish-count${finished >= MARBLES_PER_PLAYER ? " complete" : ""}" title="Marbles finished">${finished}/${MARBLES_PER_PLAYER}</span>`
+    : "";
+  const botBadge = ui.botNames?.has(player.name)
+    ? '<span class="tag tag-bot compact-bot" title="Computer player">CPU</span>'
     : "";
   return (
     `<span class="team-player-chip${compact ? " compact" : ""}${currentTurn ? " current-turn" : ""}">` +
@@ -995,13 +1053,15 @@ function teamPlayerChipHTML(player, { compact = false, currentPlayerIndex = null
         `<span class="team-player-name">${escapeHTML(player.name)}</span>` +
         `<span class="team-player-color">${escapeHTML(player.colorName)}</span>` +
       `</span>` +
+      `${finishBadge}` +
+      `${botBadge}` +
       `${turnIcon}` +
       `${youTag}` +
     `</span>`
   );
 }
 
-function renderTeamCards(container, groups, { compact = false, currentPlayerIndex = null } = {}) {
+function renderTeamCards(container, groups, { compact = false, currentPlayerIndex = null, finishedByPlayer = null } = {}) {
   if (!container) return;
   container.replaceChildren();
   groups.forEach((group) => {
@@ -1011,7 +1071,7 @@ function renderTeamCards(container, groups, { compact = false, currentPlayerInde
       : "team-card";
     if (compact) {
       const playerColumns = group.type === "players"
-        ? group.players.length
+        ? (group.players.length > 3 ? Math.ceil(group.players.length / 2) : group.players.length)
         : group.players.length >= 3
           ? 1
         : groups.length <= 2
@@ -1022,7 +1082,7 @@ function renderTeamCards(container, groups, { compact = false, currentPlayerInde
     card.innerHTML =
       `<h2>${escapeHTML(group.label)}</h2>` +
       `<div class="${compact ? "team-summary-players" : "team-card-players"}">` +
-        group.players.map((player) => teamPlayerChipHTML(player, { compact, currentPlayerIndex })).join("") +
+        group.players.map((player) => teamPlayerChipHTML(player, { compact, currentPlayerIndex, finishedByPlayer })).join("") +
       `</div>`;
     container.append(card);
   });
@@ -1054,10 +1114,25 @@ function renderLobby() {
   const { code, players, adminName, mode, validModes: vm } = ui.lobby;
   lobbyCodeLabel.textContent = code;
 
-  // Entry fee banner
+  // Entry fee: admins get an editor, everyone else sees a read-only banner.
+  const pot = (ui.entryFee || 0) * players.length;
+  if (lobbyFeeEditor) {
+    lobbyFeeEditor.hidden = !ui.isAdmin;
+    if (ui.isAdmin && lobbyFeeInput && document.activeElement !== lobbyFeeInput) {
+      lobbyFeeInput.value = ui.entryFee ? String(ui.entryFee) : "";
+    }
+    if (lobbyPotNote) {
+      if (ui.isAdmin && ui.entryFee) {
+        lobbyPotNote.hidden = false;
+        lobbyPotNote.innerHTML = `Pot <strong>${escapeHTML(formatMoney(pot))}</strong> across ${players.length} player${players.length === 1 ? "" : "s"}.`;
+      } else {
+        lobbyPotNote.hidden = true;
+        lobbyPotNote.innerHTML = "";
+      }
+    }
+  }
   if (lobbyFeeBanner) {
-    if (ui.entryFee) {
-      const pot = ui.entryFee * players.length;
+    if (ui.entryFee && !ui.isAdmin) {
       lobbyFeeBanner.hidden = false;
       lobbyFeeBanner.innerHTML = `Buy-in <strong>${escapeHTML(formatMoney(ui.entryFee))}</strong> per player · pot <strong>${escapeHTML(formatMoney(pot))}</strong>`;
     } else {
@@ -1065,25 +1140,52 @@ function renderLobby() {
       lobbyFeeBanner.innerHTML = "";
     }
   }
+  // Venmo prompt: ask the local player for a handle when a fee is active and
+  // they haven't provided one yet.
+  if (lobbyVenmoPrompt) {
+    const myHandle = ui.playerHandles?.[ui.myName]?.venmo || null;
+    const needHandle = Boolean(ui.entryFee) && !myHandle;
+    lobbyVenmoPrompt.hidden = !needHandle;
+    if (needHandle && lobbyVenmoLabel) {
+      lobbyVenmoLabel.textContent = `Add your Venmo to get paid out (buy-in ${formatMoney(ui.entryFee)})`;
+    }
+    if (needHandle && lobbyVenmoInput && !lobbyVenmoInput.value && document.activeElement !== lobbyVenmoInput) {
+      try {
+        const last = localStorage.getItem(LAST_VENMO_KEY);
+        if (last) lobbyVenmoInput.value = last;
+      } catch { /* ignore */ }
+    }
+  }
 
   // Player list
   playerListEl.replaceChildren();
+  let addBotShown = false;
   for (let i = 0; i < 6; i += 1) {
     const li = document.createElement("li");
     li.className = "lobby-slot";
     const p = players[i];
     if (p) {
       li.classList.add("filled");
+      if (p.isBot) li.classList.add("is-bot");
       const adminTag = p.name === adminName ? '<span class="tag">admin</span>' : "";
       const youTag = p.name === ui.myName ? '<span class="tag tag-self">you</span>' : "";
+      const botTag = p.isBot ? '<span class="tag tag-bot">computer</span>' : "";
       const handle = ui.playerHandles?.[p.name]?.venmo || null;
       let handleTag = "";
-      if (ui.entryFee) {
+      if (ui.entryFee && !p.isBot) {
         handleTag = handle
           ? `<span class="tag tag-handle" title="Venmo: @${escapeHTML(handle)}">@${escapeHTML(handle)}</span>`
           : '<span class="tag tag-missing">no handle</span>';
       }
-      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${handleTag}${adminTag}${youTag}`;
+      const removeBtn = ui.isAdmin && p.isBot
+        ? `<button class="bot-remove" type="button" data-bot="${escapeHTML(p.name)}" aria-label="Remove ${escapeHTML(p.name)}">×</button>`
+        : "";
+      li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-name">${escapeHTML(p.name)}</span>${botTag}${handleTag}${adminTag}${youTag}${removeBtn}`;
+    } else if (ui.isAdmin && !addBotShown && !ui.entryFee && players.length < 6) {
+      // One "Add computer player" action in the first empty slot.
+      addBotShown = true;
+      li.classList.add("add-bot-slot");
+      li.innerHTML = `<span class="slot-num">${i + 1}</span><button class="add-bot" type="button">+ Add computer player</button>`;
     } else {
       li.innerHTML = `<span class="slot-num">${i + 1}</span><span class="slot-empty">waiting…</span>`;
     }
@@ -1344,6 +1446,7 @@ function renderGame() {
       state.playerNames[cp],
     )}</span>`;
   }
+  renderWinOverlay(state);
 
   // Dice
   const noMoveAdvancePending = Boolean(state.noMoveRoll?.shouldAdvance);
@@ -1357,12 +1460,22 @@ function renderGame() {
       dieValueEl.textContent = `Rolled ${state.pendingDieValue} · choose a move`;
     } else if (canRoll) {
       dieValueEl.textContent = `Rolled ${state.pendingDieValue} · tap again`;
+    } else if (!isMyTurn) {
+      dieValueEl.textContent = `${state.playerNames[cp]} rolled ${state.pendingDieValue}`;
     } else {
       dieValueEl.textContent = `Rolled ${state.pendingDieValue}`;
     }
   } else if (!diceSpinTimer) {
     setDiceFace(null);
-    dieValueEl.textContent = canRoll ? "Tap the dice to roll" : "Waiting for roll";
+    if (state.gameOver) {
+      dieValueEl.textContent = `${state.winner} wins!`;
+    } else if (canRoll) {
+      dieValueEl.textContent = "Tap the dice to roll";
+    } else if (!isMyTurn) {
+      dieValueEl.textContent = `Waiting for ${state.playerNames[cp]} to roll`;
+    } else {
+      dieValueEl.textContent = "Waiting for roll";
+    }
   }
   rollButton.disabled = !canRoll || Boolean(diceSpinTimer);
 
@@ -1424,9 +1537,13 @@ function renderPinnedTeamSummary() {
   }
   teamSummaryPanel.hidden = false;
   teamSummaryList.style.setProperty("--team-count", Math.max(1, groups.length));
+  const finishedByPlayer = ui.game.playerNames.map((_, playerIndex) =>
+    ui.game.marbles.filter((m) => m.player === playerIndex && m.place === PLACE.FINISH).length,
+  );
   renderTeamCards(teamSummaryList, groups, {
     compact: true,
-    currentPlayerIndex: ui.game.currentPlayer,
+    currentPlayerIndex: ui.game.gameOver ? null : ui.game.currentPlayer,
+    finishedByPlayer,
   });
 }
 
@@ -1639,7 +1756,44 @@ function animateLastMove(lastMove) {
   lastAnimatedMoveSig = sig;
   const path = renderBuildMovePath(ui.game, lastMove, localSeat());
   const marble = ui.game.marbles[lastMove.marbleIdx];
-  renderAnimateAlongPath(tokenLayer, marble, path, () => {});
+  renderAnimateAlongPath(tokenLayer, marble, path, () => {
+    pulseLastMove(path[path.length - 1], marble.seat);
+  });
+}
+
+// Brief expanding ring on the destination hole so opponents' moves are easy
+// to spot after the travel animation ends.
+function pulseLastMove(point, seat) {
+  if (!point || !moveHintLayer) return;
+  moveHintLayer.querySelectorAll(".last-move-pulse").forEach((node) => node.remove());
+  const ring = svgEl("circle", {
+    class: "last-move-pulse",
+    cx: point.x,
+    cy: point.y,
+    r: 13,
+    stroke: PLAYER_COLORS[seat] ?? "#ffffff",
+  });
+  moveHintLayer.append(ring);
+  setTimeout(() => ring.remove(), 1500);
+}
+
+function renderWinOverlay(state) {
+  if (!winOverlay || !winOverlayText) return;
+  if (!state?.gameOver || !state.winner) {
+    winOverlay.hidden = true;
+    return;
+  }
+  const winnerIdx = state.playerNames.indexOf(state.winner);
+  const seat = winnerIdx >= 0 ? state.seatColors[winnerIdx] : null;
+  winOverlayText.textContent = `${state.winner} wins!`;
+  winOverlayText.style.color = seat != null ? PLAYER_COLORS[seat] : "var(--accent-strong)";
+  if (winRematchBtn) winRematchBtn.hidden = !ui.isAdmin;
+  if (winLobbyBtn) winLobbyBtn.hidden = !ui.isAdmin;
+  if (winWaitingNote) {
+    winWaitingNote.hidden = ui.isAdmin;
+    winWaitingNote.textContent = "Waiting for the host to start the next game…";
+  }
+  winOverlay.hidden = false;
 }
 
 function showCaptureFlare(lastMove) {
@@ -1854,6 +2008,17 @@ $on(resetGameBtn, "click", () => {
   send({ type: "resetGame" });
 });
 
+// Win overlay actions: the game is already over, so no confirmation needed.
+$on(winRematchBtn, "click", () => {
+  if (!ui.isAdmin) return;
+  send({ type: "resetGame" });
+});
+
+$on(winLobbyBtn, "click", () => {
+  if (!ui.isAdmin) return;
+  send({ type: "endGame" });
+});
+
 $on(endGameBtn, "click", () => {
   if (!ui.isAdmin) return;
   if (!window.confirm("End this game and return everyone to the lobby?")) return;
@@ -2056,7 +2221,7 @@ function toggleChat() {
   } else {
     if (chatInput) chatInput.blur();
     chatDrawer.classList.remove("open");
-    if (chatToggleBtn && (ui.view === "lobby" || ui.view === "game")) {
+    if (chatToggleBtn && (ui.view === "lobby" || ui.view === "staging" || ui.view === "game")) {
       chatToggleBtn.hidden = false;
     }
     setTimeout(() => {

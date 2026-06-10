@@ -154,14 +154,6 @@
           <span class="marble-letter letter-red" aria-hidden="true">M</span><span class="marble-letter letter-yellow" aria-hidden="true">a</span><span class="marble-letter letter-green" aria-hidden="true">r</span><span class="marble-letter letter-blue" aria-hidden="true">b</span><span class="marble-letter letter-white" aria-hidden="true">l</span><span class="marble-letter letter-black" aria-hidden="true">e</span><span class="marble-letter letter-red" aria-hidden="true">s</span>
         </h1>
         <div id="homeChoices" class="home-choices">
-          <label class="fee-field">
-            <span>Entry fee per player in dollars (optional)</span>
-            <span class="fee-input-wrap">
-              <span class="fee-prefix">$</span>
-              <input id="entryFeeInput" type="number" inputmode="decimal" min="0" step="0.01" placeholder="5" aria-describedby="entryFeeHelp" />
-            </span>
-            <span id="entryFeeHelp" class="fee-help">Type 5 for a $5 buy-in.</span>
-          </label>
           <button id="createBtn" class="primary-button" type="button">Create new game</button>
           <div class="or">or</div>
           <form id="joinForm" class="join-form">
@@ -198,6 +190,26 @@
           <button id="copyLinkBtn" class="secondary-button" type="button">Copy invite link</button>
         </header>
         <div id="lobbyFeeBanner" class="fee-banner" hidden></div>
+        <div id="lobbyFeeEditor" class="lobby-fee-editor" hidden>
+          <label class="fee-field">
+            <span>Entry fee per player (optional)</span>
+            <span class="fee-input-wrap">
+              <span class="fee-prefix">$</span>
+              <input id="lobbyFeeInput" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0" />
+            </span>
+          </label>
+          <p id="lobbyPotNote" class="fee-help" hidden></p>
+        </div>
+        <form id="lobbyVenmoPrompt" class="lobby-venmo-prompt" hidden>
+          <label>
+            <span id="lobbyVenmoLabel">Add your Venmo to get paid out</span>
+            <span class="handle-input-wrap">
+              <span class="handle-prefix">@</span>
+              <input id="lobbyVenmoInput" type="text" autocomplete="username" maxlength="30" placeholder="your-venmo" />
+            </span>
+          </label>
+          <button type="submit" class="secondary-button">Save handle</button>
+        </form>
         <ol id="playerList" class="lobby-list"></ol>
         <div id="modePicker" class="mode-picker"></div>
         <div id="timeLimitPicker" class="mode-picker time-limit-picker"></div>
@@ -231,7 +243,7 @@
       <section id="gameView" hidden>
         <div class="game-top-controls">
           <button class="help-button" id="howToPlayButton" type="button" aria-haspopup="dialog">How to play</button>
-          <div class="game-audio-controls" aria-label="Audio controls">
+          <div id="gameAudioControls" class="game-audio-controls" aria-label="Audio controls">
             <button id="soundToggleBtn" class="audio-toggle-button sound-toggle-button" type="button" aria-label="Toggle sound effects" hidden>
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
@@ -255,7 +267,7 @@
         </section>
 
         <section class="board-card" aria-label="Game board">
-          <svg id="board" viewBox="0 0 520 560" role="img" aria-labelledby="boardTitle">
+          <svg id="board" viewBox="0 58 520 444" role="img" aria-labelledby="boardTitle">
             <title id="boardTitle">Marbles board</title>
             <defs>
               <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
@@ -295,6 +307,17 @@
                 <span class="capture-flare-kicker">Smoked</span>
                 <strong id="captureFlareText"></strong>
               </div>
+            </div>
+          </div>
+          <div id="winOverlay" class="win-overlay" hidden>
+            <div class="win-card">
+              <span class="win-kicker">Game over</span>
+              <strong id="winOverlayText"></strong>
+              <div class="win-actions">
+                <button id="winRematchButton" class="primary-button" type="button">Rematch</button>
+                <button id="winLobbyButton" class="secondary-button" type="button">Back to lobby</button>
+              </div>
+              <p id="winWaitingNote" class="win-waiting" hidden></p>
             </div>
           </div>
         </section>
