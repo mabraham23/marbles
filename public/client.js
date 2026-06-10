@@ -1095,14 +1095,10 @@ function renderTeamCards(container, groups, { compact = false, currentPlayerInde
       ? `team-summary-group${group.type === "players" ? " all-players" : ""}`
       : "team-card";
     if (compact) {
-      const playerColumns = group.type === "players"
-        ? (group.players.length > 3 ? Math.ceil(group.players.length / 2) : group.players.length)
-        : group.players.length >= 3
-          ? 1
-        : groups.length <= 2
-          ? Math.min(group.players.length, 2)
-        : 1;
-      card.style.setProperty("--player-columns", String(Math.max(1, playerColumns)));
+      // Team cards always stack their chips in one column — side-by-side
+      // chips inside a half-width card crush the names. (The free-for-all
+      // "all-players" group ignores this var; CSS auto-fits its columns.)
+      card.style.setProperty("--player-columns", "1");
     }
     card.innerHTML =
       `<h2>${escapeHTML(group.label)}</h2>` +
@@ -1518,7 +1514,9 @@ function renderPinnedTeamSummary() {
     }];
   }
   teamSummaryPanel.hidden = false;
-  teamSummaryList.style.setProperty("--team-count", Math.max(1, groups.length));
+  // Cap the roster at two team cards per row: three side-by-side cards
+  // (6-player pairs) are too narrow for names once badges appear.
+  teamSummaryList.style.setProperty("--team-count", Math.min(2, Math.max(1, groups.length)));
   const finishedByPlayer = ui.game.playerNames.map((_, playerIndex) =>
     ui.game.marbles.filter((m) => m.player === playerIndex && m.place === PLACE.FINISH).length,
   );
