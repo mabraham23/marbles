@@ -29,6 +29,10 @@ import {
   setTokenPosition,
   svgEl,
   tokenLabelColor,
+  BOARD_CENTER,
+  baseTrackPoints,
+  finishPoint,
+  homePoint,
 } from "./shared/board-render.js?v=3";
 
 // DOM refs
@@ -517,11 +521,11 @@ function handleServerMessage(msg) {
       break;
     case "voicePeers":
       // We just joined voice; open a connection to each existing participant.
-      for (const peer of msg.peers || []) connectToPeer(peer, ui.myName > peer);
+      for (const peer of msg.peers || []) connectToPeer(peer, isVoiceInitiator(peer));
       renderVoice();
       break;
     case "voicePeerJoined":
-      if (voice.active && msg.name !== ui.myName) connectToPeer(msg.name, ui.myName > msg.name);
+      if (voice.active && msg.name !== ui.myName) connectToPeer(msg.name, isVoiceInitiator(msg.name));
       break;
     case "voicePeerLeft":
       closePeer(msg.name);
@@ -1396,12 +1400,67 @@ function groupedMoveTargets(state, moves, viewerSeat) {
 
 function chipOffset(index, count) {
   if (count === 1) return { x: 0, y: 0 };
-  const spread = 31;
+  const spread = 28;
   const start = -((count - 1) * spread) / 2;
   return { x: start + index * spread, y: -23 };
 }
 
-function makeMoveChoiceChip(state, entry, x, y, hitRadius) {
+// Every hole a piece can sit on, for measuring how clear a chip spot is.
+function boardHolePoints(state, viewerSeat, excludePoint) {
+  const holes = [...baseTrackPoints, BOARD_CENTER];
+  for (let player = 0; player < state.playerCount; player += 1) {
+    for (let slot = 0; slot < MARBLES_PER_PLAYER; slot += 1) {
+      holes.push(finishPoint(state, player, slot, viewerSeat));
+      holes.push(homePoint(state, player, slot, viewerSeat));
+    }
+  }
+  return holes.filter((h) => Math.hypot(h.x - excludePoint.x, h.y - excludePoint.y) > 1);
+}
+
+// Spot for a bump chip: tucked right against the landing hole's ring (so the
+// association is unmistakable without an arrow), rotated to whichever side
+// avoids covering marbles, keeps clear of other holes, and stays on the wood.
+function bumpChipPoint(state, move, targetPoint, viewerSeat) {
+  const D = 24;
+  const toCenterX = BOARD_CENTER.x - targetPoint.x;
+  const toCenterY = BOARD_CENTER.y - targetPoint.y;
+  const toCenterLen = Math.hypot(toCenterX, toCenterY);
+  const inward = toCenterLen < 1
+    ? { x: 0, y: -1 }
+    : { x: toCenterX / toCenterLen, y: toCenterY / toCenterLen };
+  const holes = boardHolePoints(state, viewerSeat, targetPoint);
+  const marblePoints = state.marbles
+    .map((marble) => pointForMarble(state, marble, viewerSeat))
+    .filter((p) => Math.hypot(p.x - targetPoint.x, p.y - targetPoint.y) > 1);
+  const candidates = [];
+  for (let step = 0; step < 16; step += 1) {
+    const angle = (step * Math.PI) / 8;
+    const dir = {
+      x: Math.cos(angle) * inward.x - Math.sin(angle) * inward.y,
+      y: Math.sin(angle) * inward.x + Math.cos(angle) * inward.y,
+    };
+    const point = { x: targetPoint.x + dir.x * D, y: targetPoint.y + dir.y * D };
+    candidates.push({
+      point,
+      marbleClear: Math.min(...marblePoints.map((p) => Math.hypot(p.x - point.x, p.y - point.y))),
+      holeClear: Math.min(...holes.map((h) => Math.hypot(h.x - point.x, h.y - point.y))),
+      centerDist: Math.hypot(point.x - BOARD_CENTER.x, point.y - BOARD_CENTER.y),
+      inwardness: dir.x * inward.x + dir.y * inward.y,
+    });
+  }
+  // Hard requirements: never cover a marble (~23px keeps the chip's edge off a
+  // piece) and stay on the wood. Among those, favor open space over empty
+  // holes, with a mild bias toward the board interior.
+  const valid = candidates.filter((c) => c.marbleClear >= 23 && c.centerDist <= 205);
+  const pool = valid.length ? valid : candidates;
+  pool.sort((a, b) => {
+    const score = (c) => Math.min(c.holeClear, 26) + Math.min(c.marbleClear, 40) * 0.15 + c.inwardness * 3;
+    return score(b) - score(a);
+  });
+  return pool[0].point;
+}
+
+function makeMoveChoiceChip(state, entry, x, y, hitRadius, anchor = null) {
   const marble = state.marbles[entry.move.marbleIdx];
   const labelText = moveAccessibleLabel(state, entry.move);
   const bump = entry.move.bump;
@@ -1419,7 +1478,11 @@ function makeMoveChoiceChip(state, entry, x, y, hitRadius) {
   title.textContent = labelText;
   group.append(title);
   group.append(svgEl("circle", { class: "move-hit", cx: x, cy: y, r: hitRadius }));
-  group.append(svgEl("circle", { class: "move-chip", cx: x, cy: y, r: 12.5 }));
+  // A lifted bump chip leaves the destination hole itself tappable too.
+  if (anchor && (anchor.x !== x || anchor.y !== y)) {
+    group.append(svgEl("circle", { class: "move-hit", cx: anchor.x, cy: anchor.y, r: 18 }));
+  }
+  group.append(svgEl("circle", { class: "move-chip", cx: x, cy: y, r: 10.5 }));
   const text = svgEl("text", { class: "move-chip-label", x, y: y + 0.4 });
   text.textContent = moveChipLabel(state, entry.move);
   group.append(text);
@@ -1449,22 +1512,52 @@ function renderMoveHints(isMyTurn) {
   groupedMoveTargets(state, ui.pendingMoves, viewerSeat).forEach((target) => {
     const hasOpponentBump = target.entries.some((entry) => entry.move.bump && !entry.move.bump.isTeammate);
     const hasTeammateBump = target.entries.some((entry) => entry.move.bump && entry.move.bump.isTeammate);
-    moveHintLayer.append(svgEl("circle", {
-      class: `move-target-ring${hasOpponentBump ? " capture" : ""}${hasTeammateBump ? " teammate-bump" : ""}${target.entries.length > 1 ? " multi" : ""}`,
-      cx: target.point.x,
-      cy: target.point.y,
-      r: 18,
-    }));
+    const multiClass = target.entries.length > 1 ? " multi" : "";
+    // Bump targets keep the occupied marble fully visible: only a tight ring
+    // hugging the marble (no wider than its own footprint), with the chip
+    // attached beside it. Plain targets keep the wide ring on the empty hole.
+    if (hasTeammateBump) {
+      // Caution-tape hug: a solid dark ring under marching yellow dashes, so
+      // the warning doesn't depend on any one color reading as "danger".
+      moveHintLayer.append(svgEl("circle", {
+        class: `move-target-ring teammate-bump hug hazard-base${multiClass}`,
+        cx: target.point.x, cy: target.point.y, r: 13.5,
+      }));
+      moveHintLayer.append(svgEl("circle", {
+        class: `move-target-ring teammate-bump hug hazard-stripes${multiClass}`,
+        cx: target.point.x, cy: target.point.y, r: 13.5,
+      }));
+    } else if (hasOpponentBump) {
+      moveHintLayer.append(svgEl("circle", {
+        class: `move-target-ring capture hug${multiClass}`,
+        cx: target.point.x, cy: target.point.y, r: 13.5,
+      }));
+    } else {
+      moveHintLayer.append(svgEl("circle", {
+        class: `move-target-ring${multiClass}`, cx: target.point.x, cy: target.point.y, r: 18,
+      }));
+    }
 
     target.entries.forEach((entry, index) => {
       const offset = chipOffset(index, target.entries.length);
+      const lifted = target.entries.length === 1 && entry.move.bump;
       const hitRadius = target.entries.length === 1 ? 21 : 14;
+      let chipX = target.point.x + offset.x;
+      let chipY = target.point.y + offset.y;
+      if (lifted) {
+        // Tuck a bump chip against the landing marble's ring, on the clearest
+        // side, so the pairing is obvious without covering any piece.
+        const point = bumpChipPoint(state, entry.move, target.point, viewerSeat);
+        chipX = point.x;
+        chipY = point.y;
+      }
       moveHintLayer.append(makeMoveChoiceChip(
         state,
         entry,
-        target.point.x + offset.x,
-        target.point.y + offset.y,
+        chipX,
+        chipY,
         hitRadius,
+        lifted ? target.point : null,
       ));
     });
   });
@@ -1487,7 +1580,7 @@ function renderGame() {
 
   // Turn panel
   if (state.gameOver) {
-    turnLabel.innerHTML = `<span class="winner">${state.winner} wins</span>`;
+    turnLabel.innerHTML = `<span class="winner">${escapeHTML(state.winner)} wins</span>`;
   } else {
     turnLabel.innerHTML = `<span class="current-player" style="--player-color:${PLAYER_COLORS[seat]};--player-stroke:${PLAYER_STROKES[seat]};--player-ink:${tokenLabelColor(seat)}">${escapeHTML(
       state.playerNames[cp],
@@ -1541,6 +1634,10 @@ function renderGame() {
   if (state.lastMove) {
     animateLastMove(state.lastMove);
     showCaptureFlare(state.lastMove);
+  } else {
+    // Fresh game (rematch): forget the previous game's animation signature so
+    // an identical first move still animates.
+    lastAnimatedMoveSig = null;
   }
 }
 
@@ -2523,6 +2620,8 @@ const voice = {
   localStream: null,
   peers: new Map(),   // peerName -> { pc, audioEl, pendingCandidates: [] }
 };
+// Console/debug access (client.js is a module, so nothing leaks by default).
+window.__marblesVoice = voice;
 
 function getPeer(name) {
   let peer = voice.peers.get(name);
@@ -2534,27 +2633,80 @@ function getPeer(name) {
   audioEl.dataset.peer = name;
   if (voiceAudioContainer) voiceAudioContainer.appendChild(audioEl);
 
-  peer = { pc, audioEl, pendingCandidates: [] };
+  peer = { pc, audioEl, pendingCandidates: [], repairTimer: null };
   voice.peers.set(name, peer);
 
   if (voice.localStream) {
     for (const track of voice.localStream.getTracks()) pc.addTrack(track, voice.localStream);
   }
-  pc.ontrack = (e) => { audioEl.srcObject = e.streams[0]; };
+  pc.ontrack = (e) => {
+    audioEl.srcObject = e.streams[0];
+    // iOS Safari can refuse autoplay outside a gesture window; retry on the
+    // next tap anywhere if the first attempt is blocked.
+    const p = audioEl.play();
+    if (p && p.catch) p.catch(() => { needsAudioUnlock = true; });
+  };
   pc.onicecandidate = (e) => {
     if (e.candidate) send({ type: "voiceSignal", to: name, data: { candidate: e.candidate } });
   };
-  pc.onconnectionstatechange = () => { renderVoice(); };
+  pc.onconnectionstatechange = () => {
+    renderVoice();
+    scheduleVoiceRepair(name);
+  };
   return peer;
 }
 
-async function connectToPeer(name, isInitiator) {
-  // Drop any stale connection to this peer first. This matters on reconnect:
-  // a returning player builds fresh peer connections, so everyone must discard
-  // the old one and renegotiate rather than reuse a dead RTCPeerConnection.
-  if (voice.peers.has(name)) closePeer(name);
+// Self-healing: a dead link never fixes itself in plain WebRTC, so when a
+// connection fails (network blip, phone hopping WiFi->LTE) the initiator
+// renegotiates from scratch; the non-initiator asks the initiator to do so.
+// "disconnected" gets a grace period since it often recovers on its own.
+function scheduleVoiceRepair(name) {
+  const peer = voice.peers.get(name);
+  if (!peer) return;
+  const state = peer.pc.connectionState;
+  if (state !== "failed" && state !== "disconnected") {
+    if (peer.repairTimer) { clearTimeout(peer.repairTimer); peer.repairTimer = null; }
+    return;
+  }
+  if (peer.repairTimer) return;
+  const delay = state === "failed" ? 0 : 3000;
+  peer.repairTimer = setTimeout(() => {
+    const current = voice.peers.get(name);
+    if (!current || current.pc !== peer.pc) return;
+    current.repairTimer = null;
+    const s = current.pc.connectionState;
+    if (s !== "failed" && s !== "disconnected") return;
+    if (!voice.active) return;
+    if (isVoiceInitiator(name)) {
+      connectToPeer(name, true);
+    } else {
+      send({ type: "voiceSignal", to: name, data: { renegotiate: true } });
+    }
+  }, delay);
+}
+
+// One-tap audio unlock for iOS: if any remote audio element was blocked from
+// autoplaying, the next touch anywhere retries them all.
+let needsAudioUnlock = false;
+document.addEventListener("pointerdown", () => {
+  if (!needsAudioUnlock) return;
+  needsAudioUnlock = false;
+  for (const { audioEl } of voice.peers.values()) {
+    if (audioEl && audioEl.srcObject && audioEl.paused) {
+      const p = audioEl.play();
+      if (p && p.catch) p.catch(() => { needsAudioUnlock = true; });
+    }
+  }
+}, { passive: true });
+
+// For any pair, exactly one side initiates the WebRTC offer (name order, both
+// sides agree). The initiator is also the side responsible for repairs.
+function isVoiceInitiator(peerName) {
+  return ui.myName > peerName;
+}
+
+async function sendOfferTo(name) {
   const { pc } = getPeer(name);
-  if (!isInitiator) return; // the other side will send us an offer
   try {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -2564,8 +2716,38 @@ async function connectToPeer(name, isInitiator) {
   }
 }
 
+async function connectToPeer(name, isInitiator) {
+  if (isInitiator) {
+    // The initiator always renegotiates from scratch: its teardown is safe
+    // because a fresh offer immediately follows.
+    if (voice.peers.has(name)) closePeer(name);
+    await sendOfferTo(name);
+    return;
+  }
+  // The non-initiator must NEVER tear down an existing connection here: join
+  // events can arrive after (or while) the initiator negotiated, and closing a
+  // live pc would strand a link the initiator believes is established. Just
+  // make sure a connection object exists to receive the coming offer.
+  getPeer(name);
+}
+
 async function onVoiceSignal(from, data) {
   if (!voice.active || !data) return;
+  // A renegotiation nudge: the non-initiator saw its link die and asks us (the
+  // initiator) to start a fresh session.
+  if (data.renegotiate) {
+    if (isVoiceInitiator(from)) connectToPeer(from, true);
+    return;
+  }
+  // Every incoming offer starts a fresh session on a fresh pc: the sender just
+  // created a brand-new connection, so any pc we already negotiated with is
+  // stale. Only a still-unused (fresh, offer-awaiting) pc is kept.
+  if (data.sdp && data.sdp.type === "offer") {
+    const existing = voice.peers.get(from);
+    if (existing && (existing.pc.remoteDescription || existing.pc.signalingState !== "stable")) {
+      closePeer(from);
+    }
+  }
   const peer = getPeer(from);
   const { pc } = peer;
   try {
@@ -2596,6 +2778,7 @@ async function onVoiceSignal(from, data) {
 function closePeer(name) {
   const peer = voice.peers.get(name);
   if (!peer) return;
+  if (peer.repairTimer) clearTimeout(peer.repairTimer);
   try { peer.pc.close(); } catch {}
   if (peer.audioEl) {
     peer.audioEl.srcObject = null;

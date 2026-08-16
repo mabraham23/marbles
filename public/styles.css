@@ -703,17 +703,46 @@ input::placeholder {
   stroke: #ffdf7a;
 }
 
-/* Teammate bump: a warning the player is about to send their own teammate home. */
-.move-target-ring.teammate-bump {
-  fill: rgba(217, 54, 62, 0.2);
-  stroke: #ff7a59;
-  stroke-dasharray: 3 3;
+/* Occupied (bump) targets: a tight ring hugging the marble itself, so nearby
+   holes stay visible. The chip's badge carries the capture/warning meaning. */
+.move-target-ring.hug {
+  fill: none;
+  stroke-width: 3;
+}
+
+/* Teammate bump: caution-tape hug (dark base + marching yellow dashes) plus a
+   warning-triangle badge on the chip. Deliberately not a seat color family —
+   a red or orange warning is invisible to the Red player. */
+.move-target-ring.teammate-bump.hazard-base {
+  fill: none;
+  stroke: #16130b;
+  stroke-width: 3;
+  stroke-dasharray: none;
+}
+
+.move-target-ring.teammate-bump.hazard-stripes {
+  fill: none;
+  stroke: #ffd23f;
+  stroke-width: 3;
+  stroke-dasharray: 4.7 4.7;
+  animation: hazard-march 1.1s linear infinite;
+}
+
+@keyframes hazard-march {
+  to { stroke-dashoffset: -9.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .move-target-ring.teammate-bump.hazard-stripes {
+    animation: none;
+  }
 }
 
 .move-choice.teammate-bump .move-chip {
-  stroke: #ff7a59;
+  stroke: #ffd23f;
   stroke-width: 3;
 }
+
 
 .move-choice:focus-visible .move-chip {
   stroke: #fffbe8;
@@ -734,7 +763,7 @@ input::placeholder {
 .move-chip-label {
   fill: var(--hint-ink, #fff);
   font-family: var(--font-family);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
   pointer-events: none;
   text-anchor: middle;

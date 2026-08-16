@@ -711,6 +711,9 @@ export function applyMove(state, move, roll) {
 
   state.lastMove = {
     marbleIdx: move.marbleIdx,
+    // Distinguishes byte-identical repeat moves (e.g. the same marble leaving
+    // home on the same roll twice in a game) so clients animate both.
+    turnNumber: state.turnNumber,
     roll,
     before: beforeMarble,
     after: {
