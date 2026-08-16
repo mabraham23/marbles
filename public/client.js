@@ -126,6 +126,10 @@ const endGameBtn = document.querySelector("#endGameButton");
 const adminMenuButton = document.querySelector("#adminMenuButton");
 const adminModal = document.querySelector("#adminModal");
 const adminModalCloseBtn = document.querySelector("#adminModalCloseBtn");
+const teammateBumpModal = document.querySelector("#teammateBumpModal");
+const teammateBumpNote = document.querySelector("#teammateBumpNote");
+const teammateBumpConfirmBtn = document.querySelector("#teammateBumpConfirmBtn");
+const teammateBumpCancelBtn = document.querySelector("#teammateBumpCancelBtn");
 
 const connPill = document.querySelector("#connPill");
 const soundToggleBtn = document.querySelector("#soundToggleBtn");
@@ -208,6 +212,7 @@ function showView(name) {
     settlementPanel.hidden = true;
   }
   if (adminModal && name !== "game") adminModal.hidden = true;
+  if (name !== "game") closeTeammateBumpModal();
   if (name !== "game") {
     if (statsModal) statsModal.hidden = true;
     if (ui.boardFlipped) {
@@ -1368,11 +1373,57 @@ function disablePendingMoveControls() {
   });
 }
 
-function submitPendingMove(moveIdx) {
+function submitPendingMove(moveIdx, { confirmed = false } = {}) {
+  // Sending a teammate home is costly enough (and easy enough to fat-finger
+  // next to a capture chip) that it gets an explicit confirmation.
+  const move = ui.pendingMoves?.[moveIdx];
+  if (!confirmed && move?.bump?.isTeammate && teammateBumpModal) {
+    openTeammateBumpModal(moveIdx);
+    return;
+  }
   Sound.play("click");
   disablePendingMoveControls();
   send({ type: "submitMove", moveIdx });
 }
+
+// The confirmation captures the move itself, not just its index: if the turn
+// state changes while the modal is open (timeout auto-move, reconnect), the
+// stale confirmation is dropped instead of submitting whatever now sits at
+// that index.
+let pendingTeammateBumpMove = null;
+
+function openTeammateBumpModal(moveIdx) {
+  const move = ui.pendingMoves?.[moveIdx];
+  if (!move?.bump) return;
+  pendingTeammateBumpMove = { moveIdx, sig: JSON.stringify(move) };
+  const owner = ui.game?.playerNames?.[Math.floor(move.bump.occupantIdx / MARBLES_PER_PLAYER)];
+  teammateBumpNote.textContent = owner
+    ? `This sends ${owner}'s marble (${move.bump.token}) back home to start over.`
+    : `This sends your teammate's marble (${move.bump.token}) back home to start over.`;
+  Sound.play("click");
+  teammateBumpModal.hidden = false;
+  teammateBumpCancelBtn?.focus();
+}
+
+function closeTeammateBumpModal() {
+  pendingTeammateBumpMove = null;
+  if (teammateBumpModal) teammateBumpModal.hidden = true;
+}
+
+function confirmTeammateBump() {
+  const pending = pendingTeammateBumpMove;
+  closeTeammateBumpModal();
+  if (!pending) return;
+  const move = ui.pendingMoves?.[pending.moveIdx];
+  if (!move || JSON.stringify(move) !== pending.sig) return;
+  submitPendingMove(pending.moveIdx, { confirmed: true });
+}
+
+$on(teammateBumpConfirmBtn, "click", confirmTeammateBump);
+$on(teammateBumpCancelBtn, "click", closeTeammateBumpModal);
+$on(teammateBumpModal, "click", (event) => {
+  if (event.target === teammateBumpModal) closeTeammateBumpModal();
+});
 
 function addMoveHintActivation(group, moveIdx) {
   group.addEventListener("click", () => {
@@ -1493,6 +1544,14 @@ function makeMoveChoiceChip(state, entry, x, y, hitRadius, anchor = null) {
 function renderMoveHints(isMyTurn) {
   moveHintLayer.replaceChildren();
   const state = ui.game;
+  // Close a confirmation whose move no longer exists (turn timed out, state
+  // resynced) so it can't sit over a board it no longer describes.
+  if (pendingTeammateBumpMove) {
+    const held = ui.pendingMoves?.[pendingTeammateBumpMove.moveIdx];
+    if (!isMyTurn || !held || JSON.stringify(held) !== pendingTeammateBumpMove.sig) {
+      closeTeammateBumpModal();
+    }
+  }
   if (!state || !isMyTurn || !ui.pendingMoves?.length) return;
 
   const viewerSeat = localSeat();

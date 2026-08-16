@@ -136,6 +136,16 @@
         <button id="adminModalCloseBtn" class="primary-button" type="button">Back to game</button>
       </div>
     </div>
+    <div id="teammateBumpModal" class="modal-overlay" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="teammateBumpTitle">
+        <h2 id="teammateBumpTitle">Bump your teammate?</h2>
+        <p id="teammateBumpNote" class="admin-modal-note"></p>
+        <div class="admin-modal-actions">
+          <button class="secondary-button" id="teammateBumpConfirmBtn" type="button">Yes, send it home</button>
+        </div>
+        <button id="teammateBumpCancelBtn" class="primary-button" type="button">Pick a different move</button>
+      </div>
+    </div>
     <main class="app-shell">
       <div id="errorBanner" class="error-banner" hidden></div>
 
@@ -445,6 +455,6 @@
     <!-- Hidden container for per-peer remote audio elements -->
     <div id="voiceAudioContainer" hidden aria-hidden="true"></div>
 
-    <script type="module" src="client.js?v=29"></script>
+    <script type="module" src="client.js?v=30"></script>
   </body>
 </html>
