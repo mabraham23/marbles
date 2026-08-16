@@ -97,6 +97,14 @@ Start as admin over WebSocket when no visible admin tab is available:
 node --input-type=module -e "import WebSocket from 'ws'; const ws = new WebSocket('ws://localhost:PORT/ws'); ws.on('open', () => { ws.send(JSON.stringify({ type: 'joinRoom', code: 'CODE', name: 'Admin', adminToken: 'ADMIN_TOKEN' })); setTimeout(() => ws.send(JSON.stringify({ type: 'startGame' })), 250); setTimeout(() => ws.close(), 1000); }); ws.on('message', (data) => console.log(String(data))); ws.on('error', (err) => { console.error(err); process.exit(1); });"
 ```
 
+### Simulation & Debug Tooling (tools/)
+
+- Start a test server with `ROOM_STORE=memory DEBUG_HOOKS=1 npm start`. `DEBUG_HOOKS=1` enables three WS messages (rejected otherwise): `debugPlaceMarbles` (set marble positions/current player), `debugRoll` (force a die value), and `debugCloseSocket` (kill a named player's socket to simulate an iPhone backgrounding). Never set `DEBUG_HOOKS` in production.
+- For fast full-game simulations also set `NO_MOVE_DIE_DISPLAY_MS=40 NO_MOVE_NOTICE_MS=40 TURN_TIMEOUT_SWEEP_MS=50 BOT_STEP_DELAY_MS=50` (env overrides of the pacing constants; defaults are production values).
+- `node tools/sim-full-game.mjs --players 4 --mode pairs [--bots N] [--afk N --turnLimit 15] [--fee 5] [--moveChoice best]` — plays a complete game over WS with random dice, checking board invariants on every broadcast; exits non-zero on violations/stalls. `bash tools/run-sims.sh [runs]` runs the whole configuration battery.
+- `node tools/sim-lifecycle.mjs` — game → chat → rematch → second game → endGame lobby flow.
+- `node tools/sim-scenario.mjs [CODE] [1-4]` — deterministic move-hint scenarios (teammate bump / capture / plain, center bump, multi-chip) for visual styling work; prints a room URL to open as "Mark".
+
 ### Stop Condition
 
 When asked to make the game ready to play, stop once the board is visible and the first turn is waiting. Do not roll dice unless asked.

@@ -8,10 +8,12 @@ import {
 
 export const TURN_TIME_LIMIT_OPTIONS = [0, 15, 30, 60];
 export const DEFAULT_TURN_TIME_LIMIT_SECONDS = 30;
-export const TURN_TIMEOUT_SWEEP_MS = 1000;
+// The timing constants accept env overrides so test harnesses can run games at
+// full speed; production uses the defaults.
+export const TURN_TIMEOUT_SWEEP_MS = Number(process.env.TURN_TIMEOUT_SWEEP_MS) || 1000;
 export const AUTO_CHAIN_STEP_LIMIT = 40;
-export const NO_MOVE_DIE_DISPLAY_MS = 1000;
-export const NO_MOVE_NOTICE_MS = 1800;
+export const NO_MOVE_DIE_DISPLAY_MS = Number(process.env.NO_MOVE_DIE_DISPLAY_MS) || 1000;
+export const NO_MOVE_NOTICE_MS = Number(process.env.NO_MOVE_NOTICE_MS) || 1800;
 
 export function normalizeTurnTimeLimit(raw) {
   const seconds = Number(raw);

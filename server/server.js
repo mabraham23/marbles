@@ -757,6 +757,62 @@ async function handleSubmitMove(socket, msg) {
   await broadcastGame(room);
 }
 
+// ---------- Debug hooks (DEBUG_HOOKS=1 only; for local UI simulation) ----------
+// Let a local harness place marbles and force a die value so hard-to-reach UI
+// states (e.g. teammate-bump move hints) can be reproduced deterministically.
+// The handlers are unreachable unless the server was started with DEBUG_HOOKS=1.
+const DEBUG_HOOKS = process.env.DEBUG_HOOKS === "1";
+
+async function handleDebugPlaceMarbles(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room } = found;
+  if (room.phase !== "playing" || !room.gameState) return sendError(socket, "Game not started");
+  const state = room.gameState;
+  for (const patch of Array.isArray(msg.marbles) ? msg.marbles : []) {
+    const marble = state.marbles[Number(patch.marbleIdx)];
+    if (!marble) continue;
+    marble.place = patch.place ?? marble.place;
+    marble.progress = patch.progress ?? null;
+    marble.finish = patch.finish ?? null;
+  }
+  if (Number.isInteger(msg.currentPlayer)) state.currentPlayer = msg.currentPlayer;
+  state.pendingRoll = null;
+  state.pendingDieValue = null;
+  state.noMoveRoll = null;
+  state.lastMove = null;
+  room.pendingMoves = null;
+  room.pendingMovesFor = null;
+  room.noMoveAdvanceAt = null;
+  room.timedOutAutoPlayer = null;
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
+}
+
+// Force-close a named player's socket to simulate an iPhone backgrounding
+// (Safari kills the WebSocket; the client silently reconnects and re-joins).
+async function handleDebugCloseSocket(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found) return sendError(socket, "Not in a room");
+  const conn = getConnections(found.room.code);
+  const target = conn.socketsByName.get(String(msg.name || ""));
+  if (!target) return sendError(socket, "No such player socket");
+  try { target.close(); } catch { /* ignore */ }
+}
+
+async function handleDebugRoll(socket, msg) {
+  const found = await findRoomBySocket(socket);
+  if (!found || !found.name) return sendError(socket, "Not in a room");
+  const { room } = found;
+  if (room.phase !== "playing" || !room.gameState) return sendError(socket, "Game not started");
+  const die = Math.min(6, Math.max(1, Number(msg.dieValue) || 1));
+  const now = Date.now();
+  rollForCurrentPlayer(room, die, now);
+  syncTurnDeadline(room, now);
+  await roomStore.set(room.code, room);
+  await broadcastGame(room);
+}
+
 async function handleUpdateHandle(socket, msg) {
   const found = await findRoomBySocket(socket);
   if (!found || !found.name) return sendError(socket, "Not in a room");
@@ -781,6 +837,9 @@ async function handleMarkSent(socket, msg) {
   if (!transfer) return sendError(socket, "Invalid transfer");
   if (transfer.from !== name) return sendError(socket, "Only the sender can mark sent");
   transfer.sentAt = msg.sent === false ? null : Date.now();
+  // Active settlement counts as activity: keep the finished room alive past
+  // the completed-room TTL while people are still marking payments.
+  room.completedAt = Date.now();
   await roomStore.set(room.code, room);
   await broadcastGame(room);
 }
@@ -795,6 +854,8 @@ async function handleMarkReceived(socket, msg) {
   if (!transfer) return sendError(socket, "Invalid transfer");
   if (transfer.to !== name) return sendError(socket, "Only the recipient can mark received");
   transfer.receivedAt = msg.received === false ? null : Date.now();
+  // See handleMarkSent: settlement activity extends the completed-room TTL.
+  room.completedAt = Date.now();
   await roomStore.set(room.code, room);
   await broadcastGame(room);
 }
@@ -830,6 +891,8 @@ async function handleSignBoard(socket) {
   const next = applySignature(signatures, playerId, name, Date.now());
   await roomStore.setGlobal(SIGNATURES_KEY, next);
   room.signedBy.push(playerId);
+  // Signing is post-game activity — extend the completed-room TTL.
+  room.completedAt = Date.now();
   await roomStore.set(room.code, room);
 
   // Everyone in the room sees the fresh wall; the signer also gets the
@@ -955,6 +1018,15 @@ async function handleMessage(socket, raw) {
       case "voiceJoin":      return await handleVoiceJoin(socket);
       case "voiceLeave":     return await handleVoiceLeave(socket);
       case "voiceSignal":    return await handleVoiceSignal(socket, msg);
+      case "debugPlaceMarbles":
+        if (!DEBUG_HOOKS) return sendError(socket, `Unknown message type: ${msg.type}`);
+        return await handleDebugPlaceMarbles(socket, msg);
+      case "debugRoll":
+        if (!DEBUG_HOOKS) return sendError(socket, `Unknown message type: ${msg.type}`);
+        return await handleDebugRoll(socket, msg);
+      case "debugCloseSocket":
+        if (!DEBUG_HOOKS) return sendError(socket, `Unknown message type: ${msg.type}`);
+        return await handleDebugCloseSocket(socket, msg);
       default:
         return sendError(socket, `Unknown message type: ${msg.type}`);
     }
@@ -1062,7 +1134,7 @@ wss.on("close", () => clearInterval(heartbeatTimer));
 // can read each roll before the marble moves, and watch the move animation
 // finish before the next die value appears — otherwise reroll chains look
 // like illegal moves (e.g. "left home on a 5" when the 5 was the next roll).
-const BOT_STEP_DELAY_MS = 1200;
+const BOT_STEP_DELAY_MS = Number(process.env.BOT_STEP_DELAY_MS) || 1200;
 
 function isBotName(room, name) {
   return room.players.some((p) => p.isBot && p.name === name);
